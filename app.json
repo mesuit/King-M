@@ -1,5 +1,5 @@
 {
-  "name": "PEACE CORE",
+  "name": "KING M",
   "description": "A simple yet complicated WhatsApp bot, Devpeacemaker",
   "keywords": [
     "bot",
@@ -16,7 +16,7 @@
   ],
   "website": "https://github.com/Devpeacemaker/PEACE-CORE*#readme",
   "repository": "https://github.com/Devpeacemaker/PEACE-CORE.git",
-  "logo": "https://files.catbox.moe/yusei5.jpg",
+  "logo": "https://files.catbox.moe/as1b4c.png",
   "success_url": "/",
   "env": {
     "DEV": {
