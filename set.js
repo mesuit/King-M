@@ -6,9 +6,10 @@ const herokuapi = process.env.HEROKU_API;
 const botname = process.env.BOTNAME || 'ᴘᴇᴀᴄᴇ-ʜᴜʙ';
 const author = process.env.STICKER_AUTHOR || 'ᴄᴏʀᴇ';
 const packname = process.env.STICKER_PACKNAME || 'ᴘᴇᴀᴄᴇ';
-const dev = process.env.DEV || '254752818245';
+const dev = process.env.DEV || '254769995625';
 const owner = dev.split(",");
-const menulink = process.env.MENU_LINK || 'https://files.catbox.moe/yusei5.jpg';
+const menulink = process.env.MENU_LINK || 'https://files.catbox.moe/as1b4c.png
+';
 const menu = process.env.MENU_TYPE || 'VIDEO';
 const bad = process.env.BAD_WORD || 'fuck';
 const admin = process.env.ADMIN_MSG || 'ᴄᴏᴍᴍᴀɴᴅ ʀᴇsᴇʀᴠᴇᴅ ꜰᴏʀ ᴀᴅᴍɪɴs!';
