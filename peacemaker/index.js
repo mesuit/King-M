@@ -119,7 +119,7 @@ try {
       
 if (!client.public && !mek.key.fromMe && chatUpdate.type === "notify") return;
       let m = smsg(client, mek, store);
-      const peace = require("../peacemaker/peace");
+      const peace = require("./peace");
       peace(client, m, chatUpdate, store);
     } catch (err) {
       console.log(err);
