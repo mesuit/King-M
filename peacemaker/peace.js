@@ -391,7 +391,7 @@ if (antidelete !== "off") {
 client.sendContact = async (chatId, numbers, text = '', options = {}) => {
   try {
     const contacts = numbers.map(number => ({
-      displayName: 'ᴘᴇᴀᴄᴇᴍᴀᴋᴇʀ',
+      displayName: 'MAKAMESCO',
       vcard: `BEGIN:VCARD\nVERSION:3.0\nN:ᴘᴇᴀᴄᴇᴍᴀᴋᴇʀ\nFN:ᴘᴇᴀᴄᴇᴍᴀᴋᴇʀ\nitem1.TEL;waid=${number}:${number}\nitem1.X-ABLabel:Number\nitem2.EMAIL;type=INTERNET:muuoemmanuel649@gmail.com\nitem2.X-ABLabel:Email\nitem3.URL:https://instagram.com/peacemaker_hunter72\nitem3.X-ABLabel:Instagram\nitem4.ADR:;;Kenya;;\nitem4.X-ABLabel:Region\nEND:VCARD`
     }));
 
@@ -615,8 +615,8 @@ if (antilinkall === 'on' && body.includes('https://') && !Owner && isBotAdmin &&
             });
             
                 
-let cap =`━━ *PEACE CORE* ━━
- *Owner* : Peacemaker
+let cap =`━━ *KING MD* ━━
+ *Owner* : MAKAMESCO
  *Prefix* : [ ${prefix} ]
  *Mode* : ${mode}
  *Platform* : ${process.env.NODE_ENV === 'production' ? 'Heroku' : 'Local'}
@@ -626,7 +626,7 @@ let cap =`━━ *PEACE CORE* ━━
  *Ram* : ${ram()}
 
 *DOWNLOAD MENU*
-• Video
+•Video
 • Video2
 • Play
 • Play2
@@ -1468,7 +1468,7 @@ case "redeploy": {
             );
             await m.reply("🌟 *Peace Core deployment triggered* 🌟");
         } catch (error) {
-            await m.reply("💥 *PEACE CORE DEPLOYMENT FAILED* 💥");
+            await m.reply("💥 *KING -M DEPLOYMENT FAILED* 💥");
             console.error("Redeploy error:", error.response?.data || error.message);
         }
     }
@@ -1482,16 +1482,16 @@ case "redeploy": {
     const creatorInfo = {
         text: `
 ╭─────────────────╮
-   *PEACE-CORE OFFICIAL*  
+   *KING M OFFICIAL*  
 ╰─────────────────╯
 
 🔐 *Verified Developer Credentials*
 
-🛠️ *Core Development*
+🛠️ *KING Development*
 ┌─────────────────────
-│ ✦ Founder: Peacemaker (Kenya)
-│ ✦ GitHub: Https://github.com/Devpeacemaker/PEACE-CORE 
-│ ✦ Version: Peace-Hub v3.0
+│ ✦ Founder: Makamesco (Kenya)
+│ ✦ GitHub: Https://github.com/sesco001/KING-MD
+│ ✦ Version: Peace-Hub v1.0
 └─────────────────────
 
 ⚙️ *Technical Specifications*
@@ -1504,7 +1504,7 @@ case "redeploy": {
 *"Engineered for seamless communication"*
 
 ╭─────────────────╮
- © PEACE-CORE 2025 │ 
+ © KING M 2025 │ 
 ╰─────────────────╯
 `,
     };
@@ -1578,7 +1578,7 @@ let options = []
             {
               document: { url: outputPath },
               mimetype: "audio/mp3",
-              caption: "𝙳𝙾𝚆𝙽𝙻𝙾𝙰𝙳𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱",
+              caption: "KING M😏",
               fileName: outputFileName,
             },
             { quoted: m }
@@ -1626,7 +1626,7 @@ try {
     await client.sendMessage(m.chat, {
       document: { url: downloadResult.downloadUrl },
       mimetype: "audio/mp3",
-      caption: "𝙳𝙾𝚆𝙽𝙻𝙾𝙰𝙳𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱",
+      caption: "𝙳𝙾𝚆𝙽𝙻𝙾𝙰𝙳𝙴𝙳  𝙱𝚈 KING-M😔",
       fileName: `${result.title.replace(/[^a-zA-Z0-9 ]/g, "")}.mp3`,
       }, { quoted: m });
  
@@ -1729,7 +1729,7 @@ const cheerio = require('cheerio');
       image: {
         url: _0x29a9n6e5.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴-𝙷𝚄𝙱`
+      caption: `KING M😏`
     });
   } catch (_0x180d0734) {
     m.reply(_0x180d0734);
@@ -1750,7 +1750,7 @@ const cheerio = require('cheerio');
       image: {
         url: _0x295.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴-𝙷𝚄𝙱`
+      caption: `KING-M😏`
     });
   } catch (_0x180d) {
     m.reply(_0x180d);
@@ -1771,7 +1771,7 @@ const cheerio = require('cheerio');
       image: {
         url: _029a96e5.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
+      caption: `KING-M🥱`
     });
   } catch (_0180d034) {
     m.reply(_0180d034);
@@ -1792,7 +1792,7 @@ const cheerio = require('cheerio');
       image: {
         url: _0x29a96em5.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
+      caption: `KING-M🥱`
     });
   } catch (_0x18d034) {
     m.reply(_0x18d034);
@@ -1814,7 +1814,7 @@ m.reply("*Wait a moment...*");
       image: {
         url: hunte.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
+      caption: `KING-M🥱`
     }, {
       quoted: m
     });
@@ -1838,7 +1838,7 @@ m.reply("*Wait a moment...*");
       image: {
         url: hunterr.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
+      caption: `KING-M🥱`
     }, {
       quoted: m
     });
@@ -1862,7 +1862,7 @@ m.reply("*Wait a moment...*");
       image: {
         url: hunteer.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
+      caption: `KING-M🥱`
     }, {
       quoted: m
     });
@@ -1885,7 +1885,7 @@ m.reply("*Wait a moment...*");
       image: {
         url: hunteqr.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
+      caption: `KING-M🥱`
     }, {
       quoted: m
     });
@@ -1908,7 +1908,7 @@ m.reply("*Wait a moment...*");
       image: {
         url: _0x29a96e5.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
+      caption: `KING-M🥱`
     });
   } catch (_0x180d034) {
     m.reply(_0x180d034);
@@ -1929,7 +1929,7 @@ m.reply("*Wait a moment...*");
       image: {
         url: _0x2996e.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
+      caption: `KING-M🥱`
     });
   } catch (_0x180d3) {
     m.reply(_0x180d3);
@@ -1950,7 +1950,7 @@ m.reply("*Wait a moment...*");
       image: {
         url: _0x9a96e.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
+      caption: `KING-M😏`
     });
   } catch (_0x80d03) {
     m.reply(_0x80d03);
@@ -1971,7 +1971,7 @@ m.reply("*Wait a moment...*");
       image: {
         url: _0x29a996e.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
+      caption: `KING M🥱`
     });
   } catch (_0x180d063) {
     m.reply(_0x180d063);
@@ -2013,7 +2013,7 @@ m.reply("*Wait a moment...*");
       image: {
         url: _0x29a96.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
+      caption: `KING-M🥱`
     });
   } catch (_0x180d0) {
     m.reply(_0x180d0);
@@ -2034,7 +2034,7 @@ m.reply("*Wait a moment...*");
       image: {
         url: _0x14192dl.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
+      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 KING M😏`
     }, {
       quoted: m
     });
@@ -2057,7 +2057,7 @@ m.reply("*Wait a moment...*");
       image: {
         url: _0x14192.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
+      caption: `KING-M🥱`
     }, {
       quoted: m
     });
@@ -2080,7 +2080,7 @@ m.reply("*Wait a moment...*");
       image: {
         url: _0x14192d.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
+      caption: `KING-M🥱`
     }, {
       quoted: m
     });
@@ -2103,7 +2103,7 @@ m.reply("*Wait a moment...*");
       image: {
         url: _0x4086bb.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
+      caption: `KING-M🥱`
     }, {
       quoted: m
     });
@@ -2126,7 +2126,7 @@ m.reply("*Wait a moment...*");
       image: {
         url: _0x4959e5.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
+      caption: `KING-M🥱`
     }, {
       quoted: m
     });
@@ -2149,7 +2149,7 @@ m.reply("*Wait a moment...*");
       image: {
         url: _0x26f3ed.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
+      caption: `KING-M🥱`
     }, {
       quoted: m
     });
@@ -2172,7 +2172,7 @@ m.reply("*Wait a moment...*");
       image: {
         url: _0x357389.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
+      caption: `KING-M🥱`
     }, {
       quoted: m
     });
@@ -2195,7 +2195,7 @@ m.reply("*Wait a moment...*");
       image: {
         url: _0x57ef84.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
+      caption: `KING-M🥱`
     }, {
       quoted: m
     });
@@ -2217,7 +2217,7 @@ m.reply("*Wait a moment...*");
       image: {
         url: nick.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
+      caption: `KING-M🥱`
     }, {
       quoted: m
     });
@@ -2241,7 +2241,7 @@ m.reply("*Wait a moment...*");
       image: {
         url: hunter.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
+      caption: `KING-M🥱`
     }, {
       quoted: m
     });
@@ -2265,7 +2265,7 @@ m.reply("*Wait a moment...*");
       image: {
         url: tumba.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
+      caption: `▶️KING M`
     }, {
       quoted: m
     });
@@ -2425,7 +2425,7 @@ try {
 break;
 
 //========================================================================================================================//
-case "peace":
+case "king":
 		{
         if (!text) return reply(`Hello there, what's your question?`);
           let d = await fetchJson(
