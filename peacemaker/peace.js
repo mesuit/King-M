@@ -233,7 +233,7 @@ async function handleMessageRevocation(client, revocationMessage, antideleteMode
     const deletedDate = localNow.toLocaleDateString();
 
     // Base notification text
-    let notificationText = `🚨 *KING M ᴀɴᴛɪᴅᴇʟᴇᴛᴇ* 🚨\n\n` +
+    let notificationText = `🚨 *ᴘᴇᴀᴄᴇ ᴄᴏʀᴇ ᴀɴᴛɪᴅᴇʟᴇᴛᴇ* 🚨\n\n` +
       `👤 ᴅᴇʟᴇᴛᴇᴅ ʙʏ: ${deletedByFormatted}\n` +
       `✉️ sᴇɴᴛ ʙʏ: ${sentByFormatted}\n` +
       `📅 ᴅᴀᴛᴇ: ${deletedDate}\n` +
@@ -1482,16 +1482,16 @@ case "redeploy": {
     const creatorInfo = {
         text: `
 ╭─────────────────╮
-   *KING-M OFFICIAL*  
+   *PEACE-CORE OFFICIAL*  
 ╰─────────────────╯
 
 🔐 *Verified Developer Credentials*
 
 🛠️ *Core Development*
 ┌─────────────────────
-│ ✦ Founder: Makamesco (Kenya)
-│ ✦ GitHub: Https://github.com/Sesco001/KING-MD 
-│ ✦ Version: Peace-Hub v1.0
+│ ✦ Founder: Peacemaker (Kenya)
+│ ✦ GitHub: Https://github.com/Devpeacemaker/PEACE-CORE 
+│ ✦ Version: Peace-Hub v3.0
 └─────────────────────
 
 ⚙️ *Technical Specifications*
@@ -1504,7 +1504,7 @@ case "redeploy": {
 *"Engineered for seamless communication"*
 
 ╭─────────────────╮
- © KING-M 2025 │ 
+ © PEACE-CORE 2025 │ 
 ╰─────────────────╯
 `,
     };
@@ -1535,65 +1535,64 @@ let options = []
 		break;
 
 //========================================================================================================================//		      
-	      case 'play':{
-     if (!text) return m.reply("What song do you want to download?");
-try {
+	 case 'play':{
+  if (!text) return m.reply("Which song do you want to download?");
+  try {
     let search = await yts(text);
     let link = search.all[0].url;
 
-const apis = [
-      `https://xploader-api.vercel.app/ytmp3?url=${link}`,
-      `https://apis.davidcyriltech.my.id/youtube/mp3?url=${link}`,
-      `https://api.ryzendesu.vip/api/downloader/ytmp3?url=${link}`,
-      `https://api.dreaded.site/api/ytdl/audio?url=${link}`
-       ];
+    const api = `https://casper-tech-apis.vercel.app/api/downloader/yt-audio?url=${link}`;
 
-    for (const api of apis) {
-      try {
-        let data = await fetchJson(api);
+    try {
+      let data = await fetchJson(api);
 
-        // Checking if the API response is successful
-        if (data.status === 200 || data.success) {
-          let videoUrl = data.result?.downloadUrl || data.url;
-          let outputFileName = `${search.all[0].title.replace(/[^a-zA-Z0-9 ]/g, "")}.mp3`;
-          let outputPath = path.join(__dirname, outputFileName);
-
-          const response = await axios({
-            url: videoUrl,
-            method: "GET",
-            responseType: "stream"
-          });
-
-          if (response.status !== 200) {
-            m.reply("sorry but the API endpoint didn't respond correctly. Try again later.");
-            continue;
-          }
-		ffmpeg(response.data)
-            .toFormat("mp3")
-            .save(outputPath)
-            .on("end", async () => {
-await client.sendMessage(
-                m.chat,
-                {
-                  document: { url: outputPath },
-                  mimetype: "audio/mp3",
-		  caption: "𝙳𝙾𝚆𝙽𝙻𝙾𝙰𝙳𝙴𝙳  𝙱𝚈 KING M",
-                  fileName: outputFileName,
-                },
-                { quoted: m }
-              );
-              fs.unlinkSync(outputPath);
-            })
-            .on("error", (err) => {
-              m.reply("Download failed\n" + err.message);
-            });
-          return;
-        }
-      } catch (e) {
-        continue;
+      // Handle API response structure
+      let videoUrl;
+      if (data.success && data.result) {
+        videoUrl = data.result.url || data.result.downloadUrl;
       }
-   }
-    m.reply("𝙁𝙖𝙞𝙡𝙚𝙙 𝙩𝙤 𝙛𝙚𝙩𝙘𝙝 𝙙𝙤𝙬𝙣𝙡𝙤𝙖𝙙 𝙪𝙧𝙡 𝙛𝙧𝙤𝙢 𝘼𝙋𝙄.");
+
+      if (!videoUrl) {
+        throw new Error("No download URL found in API response");
+      }
+
+      let outputFileName = `${search.all[0].title.replace(/[^a-zA-Z0-9 ]/g, "")}.mp3`;
+      let outputPath = path.join(__dirname, outputFileName);
+
+      const response = await axios({
+        url: videoUrl,
+        method: "GET",
+        responseType: "stream"
+      });
+
+      if (response.status !== 200) {
+        throw new Error("API endpoint didn't respond correctly");
+      }
+
+      ffmpeg(response.data)
+        .toFormat("mp3")
+        .save(outputPath)
+        .on("end", async () => {
+          await client.sendMessage(
+            m.chat,
+            {
+              document: { url: outputPath },
+              mimetype: "audio/mp3",
+              caption: "𝙳𝙾𝚆𝙽𝙻𝙾𝙰𝙳𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱",
+              fileName: outputFileName,
+            },
+            { quoted: m }
+          );
+          fs.unlinkSync(outputPath);
+        })
+        .on("error", (err) => {
+          m.reply("Download failed\n" + err.message);
+        });
+
+    } catch (apiError) {
+      m.reply("Failed to fetch download URL from API: " + apiError.message);
+    }
+
   } catch (error) {
     m.reply("Download failed\n" + error.message);
   }
@@ -1627,7 +1626,7 @@ try {
     await client.sendMessage(m.chat, {
       document: { url: downloadResult.downloadUrl },
       mimetype: "audio/mp3",
-      caption: "𝙳𝙾𝚆𝙽𝙻𝙾𝙰𝙳𝙴𝙳  𝙱𝚈 KING M",
+      caption: "𝙳𝙾𝚆𝙽𝙻𝙾𝙰𝙳𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱",
       fileName: `${result.title.replace(/[^a-zA-Z0-9 ]/g, "")}.mp3`,
       }, { quoted: m });
  
@@ -1730,7 +1729,7 @@ const cheerio = require('cheerio');
       image: {
         url: _0x29a9n6e5.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 KING M`
+      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴-𝙷𝚄𝙱`
     });
   } catch (_0x180d0734) {
     m.reply(_0x180d0734);
@@ -1751,7 +1750,7 @@ const cheerio = require('cheerio');
       image: {
         url: _0x295.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 KING M`
+      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴-𝙷𝚄𝙱`
     });
   } catch (_0x180d) {
     m.reply(_0x180d);
@@ -1772,7 +1771,7 @@ const cheerio = require('cheerio');
       image: {
         url: _029a96e5.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 KING M`
+      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
     });
   } catch (_0180d034) {
     m.reply(_0180d034);
@@ -1793,7 +1792,7 @@ const cheerio = require('cheerio');
       image: {
         url: _0x29a96em5.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 KING M`
+      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
     });
   } catch (_0x18d034) {
     m.reply(_0x18d034);
@@ -1815,7 +1814,7 @@ m.reply("*Wait a moment...*");
       image: {
         url: hunte.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 KING M`
+      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
     }, {
       quoted: m
     });
@@ -1839,7 +1838,7 @@ m.reply("*Wait a moment...*");
       image: {
         url: hunterr.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 KING M`
+      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
     }, {
       quoted: m
     });
@@ -1863,7 +1862,7 @@ m.reply("*Wait a moment...*");
       image: {
         url: hunteer.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 KING M`
+      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
     }, {
       quoted: m
     });
@@ -1886,7 +1885,7 @@ m.reply("*Wait a moment...*");
       image: {
         url: hunteqr.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 KING M`
+      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
     }, {
       quoted: m
     });
@@ -1909,7 +1908,7 @@ m.reply("*Wait a moment...*");
       image: {
         url: _0x29a96e5.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 KING M`
+      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
     });
   } catch (_0x180d034) {
     m.reply(_0x180d034);
@@ -1930,7 +1929,7 @@ m.reply("*Wait a moment...*");
       image: {
         url: _0x2996e.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 KING M`
+      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
     });
   } catch (_0x180d3) {
     m.reply(_0x180d3);
@@ -1951,7 +1950,7 @@ m.reply("*Wait a moment...*");
       image: {
         url: _0x9a96e.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 KING M`
+      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
     });
   } catch (_0x80d03) {
     m.reply(_0x80d03);
@@ -1962,7 +1961,7 @@ m.reply("*Wait a moment...*");
 //========================================================================================================================//		      
 	      case 'typography': {   
 		          if (!text || text == "") {
-      m.reply("Example Usage : " + prefix + "Typography Makameco");
+      m.reply("Example Usage : " + prefix + "Typography Peacemaker");
       return;
     }
      try {
@@ -1972,7 +1971,7 @@ m.reply("*Wait a moment...*");
       image: {
         url: _0x29a996e.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 KING M`
+      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
     });
   } catch (_0x180d063) {
     m.reply(_0x180d063);
@@ -1993,7 +1992,7 @@ m.reply("*Wait a moment...*");
       image: {
         url: _0x29a96e.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 KING M`
+      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
     });
   } catch (_0x180d03) {
     m.reply(_0x180d03);
@@ -2014,7 +2013,7 @@ m.reply("*Wait a moment...*");
       image: {
         url: _0x29a96.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 KING M`
+      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
     });
   } catch (_0x180d0) {
     m.reply(_0x180d0);
@@ -2035,7 +2034,7 @@ m.reply("*Wait a moment...*");
       image: {
         url: _0x14192dl.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 KING M`
+      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
     }, {
       quoted: m
     });
@@ -2058,7 +2057,7 @@ m.reply("*Wait a moment...*");
       image: {
         url: _0x14192.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 KING M`
+      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
     }, {
       quoted: m
     });
@@ -2081,7 +2080,7 @@ m.reply("*Wait a moment...*");
       image: {
         url: _0x14192d.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 KING M`
+      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
     }, {
       quoted: m
     });
@@ -2104,7 +2103,7 @@ m.reply("*Wait a moment...*");
       image: {
         url: _0x4086bb.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 KING M`
+      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
     }, {
       quoted: m
     });
@@ -2127,7 +2126,7 @@ m.reply("*Wait a moment...*");
       image: {
         url: _0x4959e5.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 KING M`
+      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
     }, {
       quoted: m
     });
@@ -2150,7 +2149,7 @@ m.reply("*Wait a moment...*");
       image: {
         url: _0x26f3ed.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 KING M`
+      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
     }, {
       quoted: m
     });
@@ -2173,7 +2172,7 @@ m.reply("*Wait a moment...*");
       image: {
         url: _0x357389.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 KING M`
+      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
     }, {
       quoted: m
     });
@@ -2196,7 +2195,7 @@ m.reply("*Wait a moment...*");
       image: {
         url: _0x57ef84.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 KING M`
+      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
     }, {
       quoted: m
     });
@@ -2218,7 +2217,7 @@ m.reply("*Wait a moment...*");
       image: {
         url: nick.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 KING M`
+      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
     }, {
       quoted: m
     });
@@ -2242,7 +2241,7 @@ m.reply("*Wait a moment...*");
       image: {
         url: hunter.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 KING M`
+      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
     }, {
       quoted: m
     });
@@ -2266,7 +2265,7 @@ m.reply("*Wait a moment...*");
       image: {
         url: tumba.image
       },
-      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 KING M`
+      caption: `𝙶𝙴𝙽𝙴𝚁𝙰𝚃𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`
     }, {
       quoted: m
     });
@@ -2426,7 +2425,7 @@ try {
 break;
 
 //========================================================================================================================//
-case "makamesco":
+case "peace":
 		{
         if (!text) return reply(`Hello there, what's your question?`);
           let d = await fetchJson(
@@ -3194,14 +3193,14 @@ m.reply("An error occured.")
         mimetype: 'audio/mp4',
         ptt: true,
         waveform:  [100, 0, 100, 0, 100, 0, 100],
-        fileName: "KING M",
+        fileName: "𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱",
 
         contextInfo: {
           mentionedJid: [m.sender],
           externalAdReply: {
           title: "👋 ʜᴇʟʟᴏ, ᴍᴏʀᴛᴀʟ! ⚡ ᴘᴇᴀᴄᴇ ʜᴜʙ ɪs ᴀʟɪᴠᴇ ʀᴇᴀᴅʏ ᴛᴏ ᴄᴏᴍғᴏʀᴛ ʏᴏᴜ",
-          body: "KING M",
-          thumbnailUrl: "https://files.catbox.moe/as1b4c.png",
+          body: "𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱",
+          thumbnailUrl: "https://files.catbox.moe/yusei5.jpg",
           sourceUrl: '',
           mediaType: 1,
           renderLargerThumbnail: true
@@ -3215,13 +3214,13 @@ m.reply("An error occured.")
 	case "removebg": {
 try {
 
-const cap = "ᴇᴅɪᴛᴇᴅ ʙʏ KING M";
+const cap = "ᴇᴅɪᴛᴇᴅ ʙʏ ᴘᴇᴀᴄᴇ ʜᴜʙ";
 if (!m.quoted) return m.reply("Send the image then tag it with the command.");
 if (!/image/.test(mime)) return m.reply("That is not an image, try again while quoting an actual image.");             
 
 let fdr = await client.downloadAndSaveMediaMessage(m.quoted)
 let fta = await uploadToCatbox(fdr)
-                    m.reply("𝗔 𝗺𝗼𝗺𝗲𝗻𝘁, KING  𝗶𝘀 𝗲𝗿𝗮𝘀𝗶𝗻𝗴 𝘁𝗵𝗲 𝗯𝗮𝗰𝗸𝗴𝗿𝗼𝘂𝗻𝗱. . .");
+                    m.reply("𝗔 𝗺𝗼𝗺𝗲𝗻𝘁, 𝗣𝗲𝗮𝗰𝗲 𝗶𝘀 𝗲𝗿𝗮𝘀𝗶𝗻𝗴 𝘁𝗵𝗲 𝗯𝗮𝗰𝗸𝗴𝗿𝗼𝘂𝗻𝗱. . .");
 
 const image = `https://api.dreaded.site/api/removebg?imageurl=${fta}`
 await client.sendMessage(m.chat, { image: { url: image }, caption: cap}, {quoted: m });
@@ -3619,7 +3618,7 @@ case "faker": {
       if (_0x2f8982.length == 0) {
         return m.reply("𝙽𝚘 𝚏𝚊𝚔𝚎 𝙰𝚌𝚌𝚘𝚞𝚗𝚝𝚜 𝚍𝚎𝚝𝚎𝚌𝚝𝚎𝚍.");
       }
-      let _0x2d7d67 = `KING M 𝚑𝚊𝚜 𝚍𝚎𝚝𝚎𝚌𝚝𝚎𝚍 𝚝𝚑𝚎 𝚏𝚘𝚕𝚕𝚘𝚠𝚒𝚗𝚐 ${_0x2f8982.length} 𝙵𝚊𝚔𝚎 𝚊𝚌𝚌𝚘𝚞𝚗𝚝𝚜 𝚒𝚗 𝚝𝚑𝚒𝚜 𝚐𝚛𝚘𝚞𝚙:- \n`;
+      let _0x2d7d67 = `𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱 𝚑𝚊𝚜 𝚍𝚎𝚝𝚎𝚌𝚝𝚎𝚍 𝚝𝚑𝚎 𝚏𝚘𝚕𝚕𝚘𝚠𝚒𝚗𝚐 ${_0x2f8982.length} 𝙵𝚊𝚔𝚎 𝚊𝚌𝚌𝚘𝚞𝚗𝚝𝚜 𝚒𝚗 𝚝𝚑𝚒𝚜 𝚐𝚛𝚘𝚞𝚙:- \n`;
       for (let _0x28761c of _0x2f8982) {
         _0x2d7d67 += `🚮 @${_0x28761c.split("@")[0]}\n`;
       }
@@ -3633,7 +3632,7 @@ case "faker": {
     } else if (args[0] == "-x") {
       setTimeout(() => {
         client.sendMessage(m.chat, {
-          text: `𝙽𝚘𝚠 King M 𝚠𝚒𝚕𝚕 𝚛𝚎𝚖𝚘𝚟𝚎 ${_0x2f8982.length} 𝙵𝚊𝚔𝚎 𝙰𝚌𝚌𝚘𝚞𝚗𝚝𝚜 𝚏𝚛𝚘𝚖 𝚝𝚑𝚒𝚜 𝚐𝚛𝚘𝚞𝚙.\n\n𝙶𝚘𝚘𝚍𝚋𝚢𝚎👋 𝙵𝚊𝚔𝚎 𝚙𝚎𝚘𝚙𝚕𝚎.`
+          text: `𝙽𝚘𝚠 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱 𝚠𝚒𝚕𝚕 𝚛𝚎𝚖𝚘𝚟𝚎 ${_0x2f8982.length} 𝙵𝚊𝚔𝚎 𝙰𝚌𝚌𝚘𝚞𝚗𝚝𝚜 𝚏𝚛𝚘𝚖 𝚝𝚑𝚒𝚜 𝚐𝚛𝚘𝚞𝚙.\n\n𝙶𝚘𝚘𝚍𝚋𝚢𝚎👋 𝙵𝚊𝚔𝚎 𝚙𝚎𝚘𝚙𝚕𝚎.`
         }, {
           quoted: m
         });
@@ -3824,7 +3823,7 @@ m.reply("𝗣𝗲𝗻𝗱𝗶𝗻𝗴 𝗣𝗮𝗿𝘁𝗶𝗰𝗶𝗽𝗮𝗻�
      });  
      let baseUR = "/apps/" + appname;  
      let h9 = await heroku.get(baseUR + '/config-vars');  
-     let stoy = '*𝗕𝗲𝗹𝗼𝘄 𝗔𝗿𝗲 𝗛𝗲𝗿𝗼𝗸𝘂 𝗩𝗮𝗿𝗶𝗮𝗯𝗹𝗲𝘀 𝗙𝗼𝗿 KING-𝗠𝗗:*\n\n';  
+     let stoy = '*𝗕𝗲𝗹𝗼𝘄 𝗔𝗿𝗲 𝗛𝗲𝗿𝗼𝗸𝘂 𝗩𝗮𝗿𝗶𝗮𝗯𝗹𝗲𝘀 𝗙𝗼𝗿 𝗣𝗘𝗔𝗖𝗘-𝗠𝗗:*\n\n';  
      for ( vrt in h9) { // Added 'const' to declare 'vr' 
          stoy += vrt + '=' + h9[vrt] + '\n\n'; // Fixed variable name 'str' to 'sto' 
      }  
@@ -3898,7 +3897,7 @@ await client.sendMessage(m.chat, {
       await client.sendMessage(m.chat, {
         video: { url: videoUrl },
         mimetype: "video/mp4",
-        caption: "𝙳𝙾𝚆𝙽𝙻𝙾𝙰𝙳𝙴𝙳  𝙱𝚈 KING M"
+        caption: "𝙳𝙾𝚆𝙽𝙻𝙾𝙰𝙳𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱"
       },{ quoted: m });
     }
   } catch (error) {
@@ -3932,7 +3931,7 @@ try {
 
 	await client.sendMessage(m.chat, {
               video: { url: video_hd },
-              caption: "𝙳𝙾𝚆𝙽𝙻𝙾𝙰𝙳𝙴𝙳  𝙱𝚈 KING M"
+              caption: "𝙳𝙾𝚆𝙽𝙻𝙾𝙰𝙳𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱"
             }, { quoted: m });
 
 	} catch (error) {
@@ -3973,7 +3972,7 @@ await client.sendMessage(m.chat, {
             m.chat,
             {
                 video: { url: fbvid },
-                caption: "𝙳𝙾𝚆𝙽𝙻𝙾𝙰𝙳𝙴𝙳  𝙱𝚈 KING M",
+                caption: "𝙳𝙾𝚆𝙽𝙻𝙾𝙰𝙳𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱",
                 gifPlayback: false,
             },
             { quoted: m }
@@ -4016,7 +4015,7 @@ await client.sendMessage(m.chat, {
 
       await client.sendMessage(m.chat, {
         video: { url: videoUrl },
-        caption: "KING M SUCKS",
+        caption: "𝙳𝙾𝚆𝙽𝙻𝙾𝙰𝙳𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱",
         gifPlayback: false
       }, { quoted: m });
 
@@ -4051,7 +4050,7 @@ try {
         }
 
         const media = response.data.BK9;
-        const capp = `𝙳𝙾𝚆𝙽𝙻𝙾𝙰𝙳𝙴𝙳  𝙱𝚈 KING M`;
+        const capp = `𝙳𝙾𝚆𝙽𝙻𝙾𝙰𝙳𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱`;
 
 if (media.length > 0) {
             const videoUrl = media.find(item => item.url.includes('.mp4'))?.url;
@@ -4430,7 +4429,7 @@ break;
 case 'sc':
 case 'script':
 case 'repo': {
-  const res = await fetch('https://api.github.com/repos/sesco001/KING-MD');
+  const res = await fetch('https://api.github.com/repos/Devpeacemaker/PEACE-CORE');
   const data = await res.json();
 
   // Adjust time to Kenya timezone (UTC+3)
@@ -4446,14 +4445,14 @@ case 'repo': {
 ${data.description || '_No description provided_'}
 
 🟣 *ᴅᴇᴘʟᴏʏ ʜᴇʀᴇ:*  
-*https://github.com/sesco001/KING-MD*
+*https://github.com/Devpeacemaker/PEACE-CORE*
 
 🔶  *Stars:* ${data.stargazers_count}  
 🔶  *Forks:* ${data.forks_count}
 
 🕒 *Time:* ${currentTime} 
 
-🚀 𝙲𝙾𝙳𝙴𝙳 𝙱𝚈 MAKAMESCO�
+🚀 𝙲𝙾𝙳𝙴𝙳 𝙱𝚈 𝙿𝙴𝙰𝙲𝙴𝙼𝙰𝙺𝙴𝚁
   `.trim();
 
   await client.sendMessage(m.chat, { text: caption }, { quoted: m });
@@ -5016,7 +5015,7 @@ if (!text) return m.reply("𝗣𝗿𝗼𝘃𝗶𝗱𝗲 𝗮 𝘃𝗮𝗹𝗶�
                 {
                   document: { url: outputPath },
                   mimetype: "audio/mp3",
-		  caption: "𝙳𝙾𝚆𝙽𝙻𝙾𝙰𝙳𝙴𝙳  𝙱𝚈 KING M",
+		  caption: "𝙳𝙾𝚆𝙽𝙻𝙾𝙰𝙳𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱",
                   fileName: outputFileName,
                 },
                 { quoted: m }
@@ -5060,11 +5059,7 @@ if (!text) return m.reply("𝗣𝗿𝗼𝘃𝗶𝗱𝗲 𝗮 𝘃𝗮𝗹𝗶�
     }
     let link = search.all[0].url; 
 
-    const apiUrl = `https://apiskeith.vercel.app/download/ytmp3?url=${enc}`,
-    `https://apiskeith.vercel.app/download/audio?url=${enc}`,
-    `https://apiskeith.vercel.app/download/ytv?url=${enc}`,
-    `https://my-rest-apis-six.vercel.app/download?url=${enc}`,
-		`https://apis-keith.vercel.app/download/dlmp4?url=${link}`;
+    const apiUrl = `https://apis-keith.vercel.app/download/dlmp4?url=${link}`;
 
     let response = await fetch(apiUrl);
     let data = await response.json();
@@ -5083,7 +5078,7 @@ if (!text) return m.reply("𝗣𝗿𝗼𝘃𝗶𝗱𝗲 𝗮 𝘃𝗮𝗹𝗶�
         {
           video: { url: videoData.downloadUrl },
           mimetype: "video/mp4",
-          caption: "𝙳𝙾𝚆𝙽𝙻𝙾𝙰𝙳𝙴𝙳  𝙱𝚈 KING M",
+          caption: "𝙳𝙾𝚆𝙽𝙻𝙾𝙰𝙳𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱",
         },
         { quoted: m }
       );
@@ -5106,14 +5101,14 @@ case "speed": {
     const start = performance.now();
 
     // Send initial message
-    let { key } = await client.sendMessage(m.chat, { text: "🔶KING M Speed" });
+    let { key } = await client.sendMessage(m.chat, { text: "🔶PeaceCore Speed" });
 
     const end = performance.now();
     const Rspeed = end - start;
     const formattedSpeed = formatSpeed(Rspeed);
 
     // Edit so speed is next to text
-    await client.sendMessage(m.chat, { text: `🔶KING Speed ${formattedSpeed}`, edit: key });
+    await client.sendMessage(m.chat, { text: `🔶PeaceCore Speed ${formattedSpeed}`, edit: key });
 }
 break;
 
@@ -5131,11 +5126,10 @@ break;
                     contextInfo: {
                         externalAdReply: {
                             showAdAttribution: true,
-                            title: 'KING M',
-                            body: 'https://github.com/sesco001/KING-MD',
-                            thumbnailUrl: 'https://files.catbox.moe/as1b4c.png
-',
-                            sourceUrl: 'https://github.com/sesco001/King-M',
+                            title: '𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱',
+                            body: 'https://github.com/Devpeacemaker/PEACE-HUB',
+                            thumbnailUrl: 'https://files.catbox.moe/yusei5.jpg',
+                            sourceUrl: 'https://github.com/Devpeacemaker/unknown-error',
                             mediaType: 1,
                             renderLargerThumbnail: true
                         }
@@ -5159,7 +5153,7 @@ break;
                 mimetype: "application/vnd.android.package-archive",
                 contextInfo: {
         externalAdReply: {
-          title: `King M`,
+          title: `𝙿𝙴𝙰𝙲𝙴-𝙷𝚄𝙱`,
           body: `${tylor.BK9.name}`,
           thumbnailUrl: `${tylor.BK9.icon}`,
           sourceUrl: `${tylor.BK9.dllink}`,
@@ -5348,7 +5342,7 @@ if (!text) return m.reply("No emojis provided ? ")
          let res = groups.map(v => v.id) 
          reply(` Broadcasting in ${res.length} Group Chat, in ${res.length * 1.5} seconds`) 
          for (let i of res) { 
-             let txt = `KING M 𝗕𝗥𝗢𝗔𝗗𝗖𝗔𝗦𝗧\n\n🀄 Message: ${text}\n\nAuthor: ${pushname}` 
+             let txt = `𝗣𝗘𝗔𝗖𝗘-𝗔𝗶 𝗕𝗥𝗢𝗔𝗗𝗖𝗔𝗦𝗧\n\n🀄 Message: ${text}\n\nAuthor: ${pushname}` 
              await client.sendMessage(i, { 
                  image: { 
                      url: menulink
@@ -5545,7 +5539,7 @@ let ts = await convertTimestamp(info.creation);
 try {
         pp = await client.profilePictureUrl(chat, 'image');
       } catch {
-        pp = 'https://files.catbox.moe/as1b4c.png';
+        pp = 'https://files.catbox.moe/duv8ac.jpg';
       }
 
 await client.sendMessage(m.chat, { image: { url: pp }, 
