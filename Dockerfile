@@ -1,5 +1,5 @@
 # Use Node 16 as the base image
-FROM node:16-buster
+FROM node:20-buster
 
 # Install system dependencies for media (FFmpeg, ImageMagick, WebP)
 RUN apt-get update && apt-get install -y \
