@@ -1,22 +1,25 @@
-# Use Node 16 as the base image
-FROM node:20-buster
+FROM node:lts
 
-# Install system dependencies for media (FFmpeg, ImageMagick, WebP)
-RUN apt-get update && apt-get install -y \
-    ffmpeg \
-    imagemagick \
-    webp \
-    && rm -rf /var/lib/apt/lists/*
+# Install dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg imagemagick webp && apt-get clean
 
-# Set the working directory
-WORKDIR /root/King-M
+# Set working directory
+WORKDIR /app
 
-# Copy package files and install npm dependencies
-COPY package.json .
-RUN npm install
+# Copy package files
+COPY package*.json ./
 
-# Copy the rest of the bot's source code
+# Install dependencies
+RUN npm install && npm cache clean --force
+
+# Copy application code
 COPY . .
 
-# Start the bot using the optimized memory command from your Procfile
-CMD ["node", "--optimize_for_size", "--max_old_space_size=460", "index.js"]
+# Expose port
+EXPOSE 3000
+
+# Set environment
+ENV NODE_ENV production
+
+# Run command
+CMD ["npm", "run", "start"]
