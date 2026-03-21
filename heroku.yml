@@ -1,11 +1,7 @@
-setup:
-  addons:
-    - plan: heroku-postgresql
-      as: DATABASE
 build:
   docker:
-    web: Dockerfile
-  config:
-    CODE: "254"
+    web:
+      dockerfile: Dockerfile
+
 run:
-  web: node --optimize_for_size --max_old_space_size=460 index.js
+  web: npm start
