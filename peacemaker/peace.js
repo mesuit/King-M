@@ -1,4 +1,4 @@
-const { BufferJSON, WA_DEFAULT_EPHEMERAL, generateWAMessageFromContent, proto, generateWAMessageContent, generateWAMessage, getBinaryNodeChild, getBinaryNodeChildren, prepareWAMessageMedia, areJidsSameUser, getContentType } = require("@whiskeysockets/baileys");
+const { BufferJSON, WA_DEFAULT_EPHEMERAL, generateWAMessageFromContent, proto, generateWAMessageContent, generateWAMessage, getBinaryNodeChild, getBinaryNodeChildren, prepareWAMessageMedia, areJidsSameUser, getContentType, downloadContentFromMessage, downloadMediaMessage } = require("@whiskeysockets/baileys");
 const fs = require("fs");
 const path = require('path');
 const util = require("util");
@@ -5724,7 +5724,10 @@ case "retrieve": {
         // React to show processing
         await client.sendMessage(m.chat, { react: { text: '⏳', key: m.key } });
 
-        const buffer = await client.downloadMediaMessage(m.quoted);
+        const mediaMsg = isImage || isVideo;
+        const stream2 = await downloadContentFromMessage(mediaMsg, isImage ? 'image' : 'video');
+        let buffer = Buffer.from([]);
+        for await (const chunk of stream2) { buffer = Buffer.concat([buffer, chunk]); }
         const caption = `✨ *KING M RETRIEVER* ✨\n\n_Original Caption:_ ${ (isImage ? isImage.caption : isVideo.caption) || "None"}`;
 
         if (isImage) {
@@ -5748,27 +5751,33 @@ break;
     try {
         if (!m.quoted) return m.reply("Please reply to a media message.");
         
-        const quotedMsg = m.quoted.message?.ephemeralMessage?.message || m.quoted.message;
-        const type = Object.keys(quotedMsg || {})[0];
-        const media = quotedMsg[type];
+        const quotedMsg = m.quoted.message?.ephemeralMessage?.message ||
+            m.quoted.message?.viewOnceMessageV2?.message ||
+            m.quoted.message?.viewOnceMessageV2Extension?.message ||
+            m.quoted.message?.viewOnceMessage?.message ||
+            m.quoted.message;
 
-        if (!media) return m.reply("Unsupported media.");
+        const mediaTypes = ['imageMessage','videoMessage','audioMessage','documentMessage','stickerMessage'];
+        const type = Object.keys(quotedMsg || {}).find(k => mediaTypes.includes(k));
+        const media = type ? quotedMsg[type] : null;
 
-        const stream = await downloadContentFromMessage(media, type.replace('Message', ''));
+        if (!media) return m.reply("❌ Unsupported or non-media message. Reply to an image, video, audio, or sticker.");
+
+        const mediaKind = type.replace('Message', '');
+        const stream = await downloadContentFromMessage(media, mediaKind);
         let buffer = Buffer.from([]);
         for await (const chunk of stream) { buffer = Buffer.concat([buffer, chunk]); }
 
-        // Use normalized JID to ensure it lands in your main DM
         const botId = client.decodeJid(client.user.id);
         await client.sendMessage(botId, { 
-            [type.replace('Message', '')]: buffer, 
+            [mediaKind]: buffer, 
             caption: `✨ *KING M DM Send* ✨\nFrom: @${m.sender.split('@')[0]}`,
             mentions: [m.sender]
         });
         m.reply("✅ Sent to your DM.");
     } catch (err) {
         logError('VV2', err);
-        m.reply("Failed to send to DM.");
+        m.reply("❌ Failed to send to DM.");
     }
 }
 break;
@@ -5777,15 +5786,16 @@ break;
    case 'take': {
     const { Sticker, StickerTypes } = require('wa-sticker-formatter');
     try {
-        if (!m.quoted || m.quoted.mtype !== 'stickerMessage') return m.reply('Please reply to a sticker.');
+        if (!m.quoted) return m.reply('Please reply to a sticker.');
+        const stickerMsg = m.quoted.msg || m.quoted.message?.stickerMessage;
+        if (!stickerMsg) return m.reply('❌ That is not a sticker. Please reply to a sticker.');
         
-        // Correctly target the sticker message content for your library
-        const stream = await downloadContentFromMessage(m.quoted.message.stickerMessage, 'sticker');
+        const stream = await downloadContentFromMessage(stickerMsg, 'sticker');
         let buffer = Buffer.from([]);
         for await (const chunk of stream) { buffer = Buffer.concat([buffer, chunk]); }
 
         let stickerResult = new Sticker(buffer, {
-            pack: pushname, // Stolen name
+            pack: pushname,
             author: pushname, 
             type: StickerTypes.FULL,
             quality: 70
@@ -5793,7 +5803,7 @@ break;
         await client.sendMessage(m.chat, { sticker: await stickerResult.toBuffer() }, { quoted: m });
     } catch (err) {
         logError('TAKE', err);
-        m.reply("Failed to take sticker.");
+        m.reply("❌ Failed to take sticker.");
     }
 }
 break;
@@ -6474,7 +6484,7 @@ case "listsudo":
 let file = require.resolve(__filename);
 fs.watchFile(file, () => {
   fs.unwatchFile(file);
-  logInfo(`File updated: ${__filename}`);
+  console.log(chalk.cyan(`[HOT-RELOAD] File updated: ${__filename}`));
   delete require.cache[file];
   require(file);
 });

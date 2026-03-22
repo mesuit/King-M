@@ -19,11 +19,27 @@ const express = require("express");
 const chalk = require("chalk");
 const FileType = require("file-type");
 const figlet = require("figlet");
+const qrcode = require("qrcode-terminal");
 const logger = pino({ level: 'silent' });
 const app = express();
 const _ = require("lodash");
 const EventEmitter = require('events');
-EventEmitter.defaultMaxListeners = 20;
+EventEmitter.defaultMaxListeners = 50;
+
+// Suppress noisy Baileys/libsignal internal console output
+const _origLog = console.log;
+const _origErr = console.error;
+const _noisePatterns = ['Closing session', 'Closing open session', 'SessionEntry', '_chains', 'registrationId', 'currentRatchet', 'ephemeralKeyPair', 'indexInfo', 'remoteIdentityKey', 'rootKey', 'lastRemoteEphemeral'];
+console.log = (...args) => {
+  const msg = args.map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
+  if (_noisePatterns.some(p => msg.includes(p))) return;
+  _origLog(...args);
+};
+console.error = (...args) => {
+  const msg = args.map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
+  if (_noisePatterns.some(p => msg.includes(p))) return;
+  _origErr(...args);
+};
 
 let lastTextTime = 0;
 const messageDelay = 3000;
@@ -64,7 +80,6 @@ async function startPeace() {
   const client = peaceConnect({
     version,
     logger: pino({ level: "silent" }),
-    printQRInTerminal: false,
     browser: ["KING-M", "Safari", "5.1.7"],
     auth: state,
     syncFullHistory: true,
@@ -156,7 +171,7 @@ async function startPeace() {
       peace(client, m, chatUpdate, store);
       
     } catch (err) {
-      console.log(err);
+      console.log(chalk.red('[MSG ERROR]'), err.message || err);
     }
   });
 
@@ -208,7 +223,11 @@ async function startPeace() {
   });
 
   client.ev.on("connection.update", async (update) => {
-    const { connection, lastDisconnect } = update;
+    const { connection, lastDisconnect, qr } = update;
+    if (qr) {
+      console.log(chalk.yellow("\n📱 Scan this QR code to connect KING-M to WhatsApp:\n"));
+      qrcode.generate(qr, { small: true });
+    }
     if (connection === "close") {
       let reason = new Boom(lastDisconnect?.error)?.output.statusCode;
       if (reason !== DisconnectReason.loggedOut) {
@@ -228,6 +247,6 @@ async function startPeace() {
 
 app.use(express.static("pixel"));
 app.get("/", (req, res) => res.sendFile(__dirname + "/index.html"));
-app.listen(port, () => console.log(`📡 Server on port ${port}`));
+app.listen(port, "0.0.0.0", () => console.log(`📡 Server on port ${port}`));
 
 startPeace();

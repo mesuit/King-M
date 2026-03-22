@@ -1,0 +1,7 @@
+node_modules/
+.env
+session/
+*.db
+message_data/
+attached_assets/
+.local/

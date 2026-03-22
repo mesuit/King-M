@@ -24,9 +24,9 @@ const mycode = process.env.CODE || '254';
 const port = process.env.PORT || 5000;
 
 // 🔹 DATABASE
-// This is the Backup/Display URL. 
-// Note: The actual connection logic is handled in config.js (Hybrid Mode).
-const databaseUrl = process.env.DATABASE_URL || "postgresql://neondb_owner:npg_lSc0PpxgeYn6@ep-rapid-forest-a4hm0939-pooler.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require";
+// Set DATABASE_URL in your environment/panel to use PostgreSQL (cloud).
+// If not set, the bot will automatically use SQLite (local/VPS mode).
+const databaseUrl = process.env.DATABASE_URL || '';
 
 // 🔹 VISUALS & MENUS
 const menulink = process.env.MENU_LINK || 'https://files.catbox.moe/as1b4c.png';
