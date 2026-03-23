@@ -827,6 +827,8 @@ let cap = `
 │ ⬡ setbotname
 │ ⬡ antisticker
 │ ⬡ setreactemojie
+│ ⬡ antimention
+│ ⬡ antiforward
 ┗▣
 
 ┏▣ 👑 *OWNER ACCESS* 👑
@@ -944,6 +946,42 @@ let cap = `
 │ ⬡ addbadword
 │ ⬡ delbadword
 │ ⬡ listbadword
+│ ⬡ warn
+│ ⬡ resetwarn
+│ ⬡ warnlist
+│ ⬡ agm
+│ ⬡ pinmsg
+│ ⬡ unpinmsg
+│ ⬡ archive
+│ ⬡ unarchive
+┗▣
+
+┏▣ 📡 *NEWSLETTER & CHANNELS* 📡
+│ 📢 newscreate
+│ 📢 newsfollow
+│ 📢 newsunfollow
+│ 📢 newsname
+│ 📢 newsdesc
+│ 📢 newspic
+│ 📢 newsrempic
+│ 📢 newsdemote
+│ 📢 newsmeta
+┗▣
+
+┏▣ 💼 *BUSINESS TOOLS* 💼
+│ 🏢 bizprofile
+┗▣
+
+┏▣ 🔒 *PRIVACY & PRESENCE* 🔒
+│ 🛡️ available
+│ 🛡️ unavailable
+│ 🛡️ ppprivacy
+│ 🛡️ statusprivacy
+│ 🛡️ lastseen
+│ 🛡️ onlineprivacy
+│ 🛡️ readreceipts
+│ 🛡️ groupaddprivacy
+│ 🛡️ fetchprivacy
 ┗▣
 
 ┏▣ 💻 *CODE STUDIO* 💻
