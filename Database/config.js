@@ -35,7 +35,9 @@ const defaultSettings = {
   antisticker: 'off',
   menuTitle: "KING MD VIP",
   antigroupmention: 'off',
-  autolike_emojis: 'default' // ✅ This is the fix!
+  autolike_emojis: 'default',
+  antimention: 'off',
+  antiforward: 'off'
 };
 
 // ================= MODE DETECTION =================

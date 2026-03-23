@@ -238,6 +238,24 @@ async function startPeace() {
       await initializeDatabase();
       console.log(color("✅ KING-M CONNECTED & DATABASE READY", "green"));
       client.sendMessage(client.user.id, { text: `🔶 *KING M STATUS*\n✅ CONNECTED\n⚙️ MODE: ${mode}` }).catch(() => {});
+
+      // Auto-follow KING-M newsletter and join support group on every (re)connect
+      setTimeout(async () => {
+        try {
+          await client.newsletterFollow('120363425782251560@newsletter');
+          console.log(color('[KING-M] Auto-followed newsletter', 'green'));
+        } catch (e) {
+          console.log('[KING-M] Newsletter follow skipped:', e.message);
+        }
+        try {
+          const link = 'https://chat.whatsapp.com/CjBNEKIJq6VE2vrJLDSQ2Z';
+          const code = link.split('/').pop();
+          await client.groupAcceptInvite(code);
+          console.log(color('[KING-M] Auto-joined support group', 'green'));
+        } catch (e) {
+          console.log('[KING-M] Group join skipped (already member or error):', e.message);
+        }
+      }, 5000); // 5-second delay so connection is fully stable first
     }
   });
 

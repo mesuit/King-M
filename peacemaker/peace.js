@@ -33,6 +33,12 @@ const ytdl = require("ytdl-core");
 const Client = new Genius.Client("TUoAEhL79JJyU-MpOsBDkFhJFWFH28nv6dgVgPA-9R1YRwLNP_zicdX2omG2qKE8gYLJat5F5VSBNLfdnlpfJg"); // Scrapes if no key is provided
 const { downloadYouTube, downloadSoundCloud, downloadSpotify, searchYouTube, searchSoundCloud, searchSpotify } = require('../peacemaker/wee');
 const { getSettings, updateSetting } = require('../Database/config');
+
+// Persistent in-memory warn store: key = `groupJid_userJid` → count
+const warnStore = new Map();
+
+// Timestamp of bot start — used to skip old messages on reconnect
+const BOT_START_TIME = Date.now();
 const fetchSettings = require('../Database/fetchSettings');
 const { TelegraPh, UploadFileUgu, webp2mp4File, floNime } = require('../lib/peaceupload');
 const fancy = require('../lib/style');
@@ -60,7 +66,9 @@ const {
         menuTitle,
         antisticker,
         autolike_emojis,
-        antigroupmention
+        antigroupmention,
+        antimention,
+        antiforward
 } = await fetchSettings(); 
           
     var body =
@@ -344,7 +352,10 @@ client.ev.on('messages.upsert', async ({ messages }) => {
             if (  
                 mek.message?.protocolMessage &&  
                 mek.message.protocolMessage.type === 0  
-            ) {  
+            ) {
+                // Skip delete notifications that arrived before bot started (reconnect flood)
+                const msgTime = (mek.messageTimestamp || 0) * 1000;
+                if (msgTime < BOT_START_TIME) return;
                 await handleDeletedMessage(client, mek, antidelete);  
             }  
             else {  
@@ -407,7 +418,7 @@ if (antisticker && antisticker !== 'off' && isSticker) {
         const kid = m.sender;
         const userTag = `@${kid.split("@")[0]}`;
 
-        logInfo(`[ANTI-STICKER] Sticker detected from ${kid}`);
+        console.log(`[ANTI-STICKER] Sticker detected from ${kid}`);
 
         // ACTION: DELETE (Always delete first)
         try {
@@ -478,7 +489,7 @@ if (antisticker && antisticker !== 'off' && isSticker) {
                             text: `⚠️ @${decodedSender.split('@')[0]}, do not mention this group in your status!`, 
                             mentions: [decodedSender] 
                         });
-                        logInfo(`[ANTI-GM] Deleted status mention from ${decodedSender}`);
+                        console.log(`[ANTI-GM] Deleted status mention from ${decodedSender}`);
                     }
 
                     if (action === 'kick' && botIsAdmin) {
@@ -487,7 +498,7 @@ if (antisticker && antisticker !== 'off' && isSticker) {
                             text: `🚫 @${decodedSender.split('@')[0]} has been removed for mentioning the group in status.`, 
                             mentions: [decodedSender] 
                         });
-                        logInfo(`[ANTI-GM] Kicked ${decodedSender} for status mention`);
+                        console.log(`[ANTI-GM] Kicked ${decodedSender} for status mention`);
                     }
                 }
             }
@@ -619,6 +630,45 @@ if (antitag === 'on' && !Owner && isBotAdmin && !isAdmin && m.mentionedJid && m.
         });
         await client.groupParticipantsUpdate(m.chat, [cate], "remove");
     }
+//========================================================================================================================//
+// ANTIMENTION: warn+kick when someone mass-mentions in a group
+if (antimention === 'on' && m.isGroup && !Owner && isBotAdmin && !isAdmin && m.mentionedJid && m.mentionedJid.length >= 5) {
+    if (!itsMe) {
+        const target = m.sender;
+        const wkey = `${m.chat}_${target}`;
+        const warns = (warnStore.get(wkey) || 0) + 1;
+        warnStore.set(wkey, warns);
+        await client.sendMessage(m.chat, { delete: { remoteJid: m.chat, fromMe: false, id: m.key.id, participant: target } });
+        if (warns >= 3) {
+            await client.groupParticipantsUpdate(m.chat, [target], 'remove');
+            warnStore.delete(wkey);
+            await client.sendMessage(m.chat, { text: `@${target.split('@')[0]} kicked for mass mentioning after 3 warnings! ⛔`, contextInfo: { mentionedJid: [target] } });
+        } else {
+            await client.sendMessage(m.chat, { text: `⚠️ @${target.split('@')[0]} don't mass mention! Warning ${warns}/3.`, contextInfo: { mentionedJid: [target] } });
+        }
+        return;
+    }
+}
+//========================================================================================================================//
+// ANTIFORWARD: warn+kick when someone forwards a message in a group
+if (antiforward === 'on' && m.isGroup && !Owner && isBotAdmin && !isAdmin) {
+    const isForwarded = m.msg?.contextInfo?.isForwarded || m.message?.extendedTextMessage?.contextInfo?.isForwarded;
+    if (isForwarded && !itsMe) {
+        const target = m.sender;
+        const wkey = `${m.chat}_fwd_${target}`;
+        const warns = (warnStore.get(wkey) || 0) + 1;
+        warnStore.set(wkey, warns);
+        await client.sendMessage(m.chat, { delete: { remoteJid: m.chat, fromMe: false, id: m.key.id, participant: target } });
+        if (warns >= 3) {
+            await client.groupParticipantsUpdate(m.chat, [target], 'remove');
+            warnStore.delete(wkey);
+            await client.sendMessage(m.chat, { text: `@${target.split('@')[0]} kicked for forwarding messages after 3 warnings! ⛔`, contextInfo: { mentionedJid: [target] } });
+        } else {
+            await client.sendMessage(m.chat, { text: `⚠️ @${target.split('@')[0]} no forwarded messages allowed! Warning ${warns}/3.`, contextInfo: { mentionedJid: [target] } });
+        }
+        return;
+    }
+}
 //========================================================================================================================//
 //========================================================================================================================//      
 function formatSpeed(ms) {
@@ -1488,7 +1538,7 @@ break;
       // Refresh settings in memory
       client.settings = await db.getSettings();
       m.reply(`✅ Antiedit mode set to *${newMode}*`);
-      logInfo(`[SETTINGS] Antiedit updated to ${newMode} by ${m.sender.split('@')[0]}`);
+      console.log(`[SETTINGS] Antiedit updated to ${newMode} by ${m.sender.split('@')[0]}`);
     } else {
       m.reply('❌ Failed to update. Check bot logs.');
     }
@@ -4606,6 +4656,409 @@ if (users == "254752818245@s.whatsapp.net") return m.reply("It's an Owner Number
 }
   break;
 
+//========================================================================================================================//
+// ======================== WARN SYSTEM ========================
+case 'warn': {
+    if (!m.isGroup) throw group;
+    if (!isBotAdmin) throw botAdmin;
+    if (!isAdmin) throw admin;
+    const target = m.mentionedJid?.[0] || m.quoted?.sender;
+    if (!target) return m.reply('❌ Tag or reply to the user you want to warn.');
+    if (target === client.decodeJid(client.user.id)) return m.reply("❌ I cannot warn myself.");
+    const wkey = `${m.chat}_warn_${target}`;
+    const warns = (warnStore.get(wkey) || 0) + 1;
+    warnStore.set(wkey, warns);
+    if (warns >= 3) {
+        await client.groupParticipantsUpdate(m.chat, [target], 'remove');
+        warnStore.delete(wkey);
+        return m.reply(`@${target.split('@')[0]} has been *kicked* after reaching 3 warnings! ⛔`, { contextInfo: { mentionedJid: [target] } });
+    }
+    m.reply(`⚠️ *Warning ${warns}/3* issued to @${target.split('@')[0]}.\n${3 - warns} warning(s) left before kick.`, { contextInfo: { mentionedJid: [target] } });
+}
+break;
+//========================================================================================================================//
+case 'resetwarn': case 'unwarn': {
+    if (!m.isGroup) throw group;
+    if (!isAdmin) throw admin;
+    const target = m.mentionedJid?.[0] || m.quoted?.sender;
+    if (!target) return m.reply('❌ Tag or reply to the user to reset their warnings.');
+    const wkey = `${m.chat}_warn_${target}`;
+    warnStore.delete(wkey);
+    m.reply(`✅ Warnings cleared for @${target.split('@')[0]}.`, { contextInfo: { mentionedJid: [target] } });
+}
+break;
+//========================================================================================================================//
+case 'warnlist': case 'warns': {
+    if (!m.isGroup) throw group;
+    const entries = [...warnStore.entries()].filter(([k]) => k.startsWith(`${m.chat}_warn_`));
+    if (!entries.length) return m.reply('✅ No active warnings in this group.');
+    const list = entries.map(([k, v]) => {
+        const jid = k.replace(`${m.chat}_warn_`, '');
+        return `• @${jid.split('@')[0]}: ${v}/3 warning(s)`;
+    }).join('\n');
+    m.reply(`⚠️ *Active Warnings:*\n${list}`, { contextInfo: { mentionedJid: entries.map(([k]) => k.replace(`${m.chat}_warn_`, '')) } });
+}
+break;
+//========================================================================================================================//
+// ======================== ANTIMENTION TOGGLE ========================
+case 'antimention': {
+    if (!Owner) throw NotOwner;
+    const settings = await getSettings();
+    const current = settings.antimention;
+    if (!text) return m.reply(`🛡️ Antimention is currently *${current.toUpperCase()}*`);
+    if (!['on', 'off'].includes(text)) return m.reply('Usage: antimention on/off');
+    if (text === current) return m.reply(`✅ Antimention is already *${text.toUpperCase()}*`);
+    await updateSetting('antimention', text);
+    m.reply(`✅ Antimention turned *${text.toUpperCase()}*\n\n_When ON: anyone tagging 5+ people gets warned then kicked after 3 strikes._`);
+}
+break;
+//========================================================================================================================//
+// ======================== ANTIFORWARD TOGGLE ========================
+case 'antiforward': case 'antiforwarded': {
+    if (!Owner) throw NotOwner;
+    const settings = await getSettings();
+    const current = settings.antiforward;
+    if (!text) return m.reply(`🛡️ Antiforward is currently *${current.toUpperCase()}*`);
+    if (!['on', 'off'].includes(text)) return m.reply('Usage: antiforward on/off');
+    if (text === current) return m.reply(`✅ Antiforward is already *${text.toUpperCase()}*`);
+    await updateSetting('antiforward', text);
+    m.reply(`✅ Antiforward turned *${text.toUpperCase()}*\n\n_When ON: forwarded messages are deleted and the sender is warned (3 strikes = kick)._`);
+}
+break;
+//========================================================================================================================//
+// ======================== CHAT MANAGEMENT: PIN / UNPIN ========================
+case 'pinmsg': {
+    if (!m.isGroup) throw group;
+    if (!isBotAdmin) throw botAdmin;
+    if (!isAdmin) throw admin;
+    if (!m.quoted) return m.reply('❌ Reply to the message you want to pin.');
+    try {
+        await client.chatModify({ pin: true }, m.chat);
+        m.reply('📌 Chat pinned!');
+    } catch (e) {
+        m.reply('❌ Failed to pin: ' + e.message);
+    }
+}
+break;
+//========================================================================================================================//
+case 'unpinmsg': {
+    if (!m.isGroup) throw group;
+    if (!isBotAdmin) throw botAdmin;
+    if (!isAdmin) throw admin;
+    try {
+        await client.chatModify({ pin: false }, m.chat);
+        m.reply('📌 Chat unpinned!');
+    } catch (e) {
+        m.reply('❌ Failed to unpin: ' + e.message);
+    }
+}
+break;
+//========================================================================================================================//
+// ======================== ARCHIVE / UNARCHIVE ========================
+case 'archive': {
+    if (!Owner) throw NotOwner;
+    const targetChat = text || m.chat;
+    try {
+        await client.chatModify({ archive: true, lastMessages: [{ key: m.key, messageTimestamp: m.messageTimestamp }] }, targetChat);
+        m.reply('📦 Chat archived!');
+    } catch (e) {
+        m.reply('❌ Failed to archive: ' + e.message);
+    }
+}
+break;
+//========================================================================================================================//
+case 'unarchive': {
+    if (!Owner) throw NotOwner;
+    const targetChat = text || m.chat;
+    try {
+        await client.chatModify({ archive: false, lastMessages: [{ key: m.key, messageTimestamp: m.messageTimestamp }] }, targetChat);
+        m.reply('📦 Chat unarchived!');
+    } catch (e) {
+        m.reply('❌ Failed to unarchive: ' + e.message);
+    }
+}
+break;
+//========================================================================================================================//
+// ======================== NEWSLETTER COMMANDS ========================
+case 'newscreate': case 'createchannel': {
+    if (!Owner) throw NotOwner;
+    const args = text.split('|');
+    const channelName = args[0]?.trim();
+    const channelDesc = args[1]?.trim() || '';
+    if (!channelName) return m.reply('❌ Usage: newscreate *Name* | Description');
+    try {
+        await m.reply('⏳ Creating channel...');
+        const result = await client.newsletterCreate(channelName, channelDesc);
+        m.reply(`✅ *Channel Created!*\n\n📡 *Name:* ${channelName}\n📝 *Description:* ${channelDesc || 'None'}\n🆔 *JID:* ${result?.id || 'N/A'}`);
+    } catch (e) {
+        m.reply('❌ Failed to create channel: ' + e.message);
+    }
+}
+break;
+//========================================================================================================================//
+case 'newsfollow': case 'followchannel': {
+    if (!Owner) throw NotOwner;
+    if (!text) return m.reply('❌ Usage: newsfollow <newsletter-jid>');
+    const jid = text.trim().includes('@newsletter') ? text.trim() : `${text.trim()}@newsletter`;
+    try {
+        await client.newsletterFollow(jid);
+        m.reply(`✅ Now following channel *${jid}*`);
+    } catch (e) {
+        m.reply('❌ Failed to follow: ' + e.message);
+    }
+}
+break;
+//========================================================================================================================//
+case 'newsunfollow': case 'unfollowchannel': {
+    if (!Owner) throw NotOwner;
+    if (!text) return m.reply('❌ Usage: newsunfollow <newsletter-jid>');
+    const jid = text.trim().includes('@newsletter') ? text.trim() : `${text.trim()}@newsletter`;
+    try {
+        await client.newsletterUnfollow(jid);
+        m.reply(`✅ Unfollowed channel *${jid}*`);
+    } catch (e) {
+        m.reply('❌ Failed to unfollow: ' + e.message);
+    }
+}
+break;
+//========================================================================================================================//
+case 'newsname': case 'channelname': {
+    if (!Owner) throw NotOwner;
+    const parts = text.split('|');
+    const jid = parts[0]?.trim().includes('@newsletter') ? parts[0].trim() : `${parts[0]?.trim()}@newsletter`;
+    const newName = parts[1]?.trim();
+    if (!jid || !newName) return m.reply('❌ Usage: newsname <jid> | <new name>');
+    try {
+        await client.newsletterUpdateName(jid, newName);
+        m.reply(`✅ Channel name updated to *${newName}*`);
+    } catch (e) {
+        m.reply('❌ Failed: ' + e.message);
+    }
+}
+break;
+//========================================================================================================================//
+case 'newsdesc': case 'channeldesc': {
+    if (!Owner) throw NotOwner;
+    const parts = text.split('|');
+    const jid = parts[0]?.trim().includes('@newsletter') ? parts[0].trim() : `${parts[0]?.trim()}@newsletter`;
+    const newDesc = parts[1]?.trim();
+    if (!jid || !newDesc) return m.reply('❌ Usage: newsdesc <jid> | <new description>');
+    try {
+        await client.newsletterUpdateDescription(jid, newDesc);
+        m.reply(`✅ Channel description updated!`);
+    } catch (e) {
+        m.reply('❌ Failed: ' + e.message);
+    }
+}
+break;
+//========================================================================================================================//
+case 'newspic': case 'channelpic': {
+    if (!Owner) throw NotOwner;
+    const parts = text.split('|');
+    const jid = parts[0]?.trim().includes('@newsletter') ? parts[0].trim() : `${parts[0]?.trim()}@newsletter`;
+    if (!jid) return m.reply('❌ Usage: newspic <jid> — reply to an image');
+    if (!m.quoted || !['imageMessage'].includes(m.quoted.mtype)) return m.reply('❌ Reply to an image with this command.');
+    try {
+        const imgBuffer = await downloadMediaMessage(m.quoted, 'buffer', {});
+        await client.newsletterUpdatePicture(jid, imgBuffer);
+        m.reply(`✅ Channel picture updated!`);
+    } catch (e) {
+        m.reply('❌ Failed: ' + e.message);
+    }
+}
+break;
+//========================================================================================================================//
+case 'newsrempic': case 'channelrempic': {
+    if (!Owner) throw NotOwner;
+    if (!text) return m.reply('❌ Usage: newsrempic <jid>');
+    const jid = text.trim().includes('@newsletter') ? text.trim() : `${text.trim()}@newsletter`;
+    try {
+        await client.newsletterRemovePicture(jid);
+        m.reply(`✅ Channel picture removed!`);
+    } catch (e) {
+        m.reply('❌ Failed: ' + e.message);
+    }
+}
+break;
+//========================================================================================================================//
+case 'newsdemote': case 'channeldemote': {
+    if (!Owner) throw NotOwner;
+    const parts = text.split('|');
+    const jid = parts[0]?.trim().includes('@newsletter') ? parts[0].trim() : `${parts[0]?.trim()}@newsletter`;
+    const userJid = parts[1]?.trim();
+    if (!jid || !userJid) return m.reply('❌ Usage: newsdemote <channel-jid> | <user-jid>');
+    try {
+        await client.newsletterDemote(jid, userJid);
+        m.reply(`✅ Admin removed from channel!`);
+    } catch (e) {
+        m.reply('❌ Failed: ' + e.message);
+    }
+}
+break;
+//========================================================================================================================//
+case 'newsmeta': case 'channelinfo': {
+    if (!Owner) throw NotOwner;
+    if (!text) return m.reply('❌ Usage: newsmeta <jid>');
+    const jid = text.trim().includes('@newsletter') ? text.trim() : `${text.trim()}@newsletter`;
+    try {
+        const meta = await client.newsletterMetadata('jid', jid);
+        const info = `📡 *Channel Info*\n\n` +
+            `📛 *Name:* ${meta?.name || 'N/A'}\n` +
+            `📝 *Description:* ${meta?.description || 'None'}\n` +
+            `👥 *Subscribers:* ${meta?.subscriberCount || 'N/A'}\n` +
+            `🆔 *JID:* ${jid}`;
+        m.reply(info);
+    } catch (e) {
+        m.reply('❌ Failed: ' + e.message);
+    }
+}
+break;
+//========================================================================================================================//
+// ======================== BUSINESS PROFILE ========================
+case 'bizprofile': case 'businessprofile': {
+    if (!Owner) throw NotOwner;
+    const targetJid = m.mentionedJid?.[0] || m.quoted?.sender || m.sender;
+    try {
+        const biz = await client.getBusinessProfile(targetJid);
+        if (!biz) return m.reply('❌ No business profile found for this user.');
+        const info = `💼 *Business Profile*\n\n` +
+            `📛 *Name:* ${biz.name || 'N/A'}\n` +
+            `📝 *Description:* ${biz.description || 'None'}\n` +
+            `🏷️ *Category:* ${biz.category || 'N/A'}\n` +
+            `📧 *Email:* ${biz.email || 'N/A'}\n` +
+            `🌐 *Website:* ${biz.website?.join(', ') || 'None'}\n` +
+            `📍 *Address:* ${biz.address || 'N/A'}`;
+        m.reply(info);
+    } catch (e) {
+        m.reply('❌ Failed to fetch business profile: ' + e.message);
+    }
+}
+break;
+//========================================================================================================================//
+// ======================== PRIVACY COMMANDS ========================
+case 'available': {
+    if (!Owner) throw NotOwner;
+    try {
+        await client.sendPresenceUpdate('available');
+        m.reply('✅ Presence set to *Available* (Online)');
+    } catch (e) {
+        m.reply('❌ Failed: ' + e.message);
+    }
+}
+break;
+//========================================================================================================================//
+case 'unavailable': case 'away': {
+    if (!Owner) throw NotOwner;
+    try {
+        await client.sendPresenceUpdate('unavailable');
+        m.reply('✅ Presence set to *Unavailable* (Offline)');
+    } catch (e) {
+        m.reply('❌ Failed: ' + e.message);
+    }
+}
+break;
+//========================================================================================================================//
+case 'ppprivacy': case 'profilephotoprivacy': {
+    if (!Owner) throw NotOwner;
+    const val = text?.toLowerCase();
+    const allowed = ['all', 'contacts', 'contact_blacklist', 'none'];
+    if (!val || !allowed.includes(val)) return m.reply(`❌ Usage: ppprivacy <${allowed.join('|')}>`);
+    try {
+        await client.updateProfilePicturePrivacy(val);
+        m.reply(`✅ Profile picture privacy set to *${val}*`);
+    } catch (e) {
+        m.reply('❌ Failed: ' + e.message);
+    }
+}
+break;
+//========================================================================================================================//
+case 'statusprivacy': {
+    if (!Owner) throw NotOwner;
+    const val = text?.toLowerCase();
+    const allowed = ['all', 'contacts', 'contact_blacklist', 'none'];
+    if (!val || !allowed.includes(val)) return m.reply(`❌ Usage: statusprivacy <${allowed.join('|')}>`);
+    try {
+        await client.updateStatusPrivacy(val);
+        m.reply(`✅ Status privacy set to *${val}*`);
+    } catch (e) {
+        m.reply('❌ Failed: ' + e.message);
+    }
+}
+break;
+//========================================================================================================================//
+case 'lastseen': {
+    if (!Owner) throw NotOwner;
+    const val = text?.toLowerCase();
+    const allowed = ['all', 'contacts', 'contact_blacklist', 'none'];
+    if (!val || !allowed.includes(val)) return m.reply(`❌ Usage: lastseen <${allowed.join('|')}>`);
+    try {
+        await client.updateLastSeenPrivacy(val);
+        m.reply(`✅ Last seen privacy set to *${val}*`);
+    } catch (e) {
+        m.reply('❌ Failed: ' + e.message);
+    }
+}
+break;
+//========================================================================================================================//
+case 'onlineprivacy': {
+    if (!Owner) throw NotOwner;
+    const val = text?.toLowerCase();
+    const allowed = ['all', 'match_last_seen'];
+    if (!val || !allowed.includes(val)) return m.reply(`❌ Usage: onlineprivacy <${allowed.join('|')}>`);
+    try {
+        await client.updateOnlinePrivacy(val);
+        m.reply(`✅ Online privacy set to *${val}*`);
+    } catch (e) {
+        m.reply('❌ Failed: ' + e.message);
+    }
+}
+break;
+//========================================================================================================================//
+case 'readreceipts': {
+    if (!Owner) throw NotOwner;
+    const val = text?.toLowerCase();
+    const allowed = ['all', 'none'];
+    if (!val || !allowed.includes(val)) return m.reply(`❌ Usage: readreceipts <all|none>`);
+    try {
+        await client.updateReadReceiptsPrivacy(val);
+        m.reply(`✅ Read receipts set to *${val}*`);
+    } catch (e) {
+        m.reply('❌ Failed: ' + e.message);
+    }
+}
+break;
+//========================================================================================================================//
+case 'groupaddprivacy': {
+    if (!Owner) throw NotOwner;
+    const val = text?.toLowerCase();
+    const allowed = ['all', 'contacts', 'contact_blacklist', 'none'];
+    if (!val || !allowed.includes(val)) return m.reply(`❌ Usage: groupaddprivacy <${allowed.join('|')}>`);
+    try {
+        await client.updateGroupsAddPrivacy(val);
+        m.reply(`✅ Group add privacy set to *${val}*`);
+    } catch (e) {
+        m.reply('❌ Failed: ' + e.message);
+    }
+}
+break;
+//========================================================================================================================//
+case 'fetchprivacy': case 'privacysettings': {
+    if (!Owner) throw NotOwner;
+    try {
+        const p = await client.fetchPrivacySettings(true);
+        const info = `🔒 *Privacy Settings*\n\n` +
+            `👤 *Profile Pic:* ${p.profile || 'N/A'}\n` +
+            `🟢 *Status:* ${p.status || 'N/A'}\n` +
+            `🕐 *Last Seen:* ${p.last || 'N/A'}\n` +
+            `🌐 *Online:* ${p.online || 'N/A'}\n` +
+            `✅ *Read Receipts:* ${p.readreceipts || 'N/A'}\n` +
+            `➕ *Group Add:* ${p.groupadd || 'N/A'}`;
+        m.reply(info);
+    } catch (e) {
+        m.reply('❌ Failed to fetch privacy: ' + e.message);
+    }
+}
+break;
 //========================================================================================================================//                  
  case "instagram": case "igdl": case "ig": {
     const { igdl } = require("ruhend-scraper");
@@ -5698,50 +6151,39 @@ break;
 //========================================================================================================================// 
 case "vv":
 case "retrieve": {
-    // 1. Validate if there is a quoted message
     if (!m.quoted) return reply("⚠️ Quote a *View Once* image or video.");
-
     try {
-        // 2. Identify the message structure (Supporting standard and View-Once)
-        const msg = m.quoted.message || m.quoted;
-        
-        // This targets View-Once versions V1, V2, and Extensions
-        const viewOnceMsg = 
-            msg.viewOnceMessageV2?.message || 
-            msg.viewOnceMessageV2Extension?.message || 
-            msg.viewOnceMessage?.message || 
-            msg;
-
-        // 3. Detect Media Type
-        const isImage = viewOnceMsg.imageMessage;
-        const isVideo = viewOnceMsg.videoMessage;
-
-        if (!isImage && !isVideo) {
-            return reply("❌ No media found. Please quote a View-Once image or video.");
-        }
-
-        // 4. Download and Send
-        // React to show processing
         await client.sendMessage(m.chat, { react: { text: '⏳', key: m.key } });
 
-        const mediaMsg = isImage || isVideo;
-        const stream2 = await downloadContentFromMessage(mediaMsg, isImage ? 'image' : 'video');
-        let buffer = Buffer.from([]);
-        for await (const chunk of stream2) { buffer = Buffer.concat([buffer, chunk]); }
-        const caption = `✨ *KING M RETRIEVER* ✨\n\n_Original Caption:_ ${ (isImage ? isImage.caption : isVideo.caption) || "None"}`;
+        // peacefunc strips the outer wrapper, so m.quoted.mtype tells us exactly what we have:
+        // - 'viewOnceMessageV2' / 'viewOnceMessageV2Extension' → inner media is in m.quoted.message
+        // - 'imageMessage' / 'videoMessage' → m.quoted IS the media data directly
+        const mtype = m.quoted.mtype || '';
+        let mediaData, isImg;
 
-        if (isImage) {
-            await client.sendMessage(m.chat, { image: buffer, caption }, { quoted: m });
-        } else {
-            await client.sendMessage(m.chat, { video: buffer, caption }, { quoted: m });
+        if (mtype === 'viewOnceMessageV2' || mtype === 'viewOnceMessageV2Extension') {
+            const inner = m.quoted.message || {};
+            if (inner.imageMessage) { mediaData = inner.imageMessage; isImg = true; }
+            else if (inner.videoMessage) { mediaData = inner.videoMessage; isImg = false; }
+        } else if (mtype === 'imageMessage') {
+            mediaData = m.quoted; isImg = true;
+        } else if (mtype === 'videoMessage') {
+            mediaData = m.quoted; isImg = false;
         }
 
-        // Success Reaction
+        if (!mediaData) return reply("❌ No media found. Please quote a View-Once image or video.");
+
+        const stream2 = await downloadContentFromMessage(mediaData, isImg ? 'image' : 'video');
+        let buffer = Buffer.from([]);
+        for await (const chunk of stream2) { buffer = Buffer.concat([buffer, chunk]); }
+
+        const caption = `✨ *KING M RETRIEVER* ✨\n\n_Caption:_ ${mediaData.caption || "None"}`;
+        await client.sendMessage(m.chat, { [isImg ? 'image' : 'video']: buffer, caption }, { quoted: m });
         await client.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
 
     } catch (error) {
         logError('RETRIEVE', error);
-        reply("❌ Failed to retrieve media. It may have expired or been deleted from servers.");
+        reply("❌ Failed to retrieve media. It may have expired.");
     }
 }
 break;
@@ -5750,27 +6192,37 @@ break;
          case "alaa": case "wiih": case "waah": case "ehee": case "vv2": case "mmmh": {
     try {
         if (!m.quoted) return m.reply("Please reply to a media message.");
-        
-        const quotedMsg = m.quoted.message?.ephemeralMessage?.message ||
-            m.quoted.message?.viewOnceMessageV2?.message ||
-            m.quoted.message?.viewOnceMessageV2Extension?.message ||
-            m.quoted.message?.viewOnceMessage?.message ||
-            m.quoted.message;
 
-        const mediaTypes = ['imageMessage','videoMessage','audioMessage','documentMessage','stickerMessage'];
-        const type = Object.keys(quotedMsg || {}).find(k => mediaTypes.includes(k));
-        const media = type ? quotedMsg[type] : null;
+        // peacefunc strips the outer wrapper — m.quoted IS the media content for direct types,
+        // and m.quoted.message holds the inner content for view-once / ephemeral types.
+        const mtype = m.quoted.mtype || '';
+        const directMap = {
+            imageMessage: 'image', videoMessage: 'video',
+            audioMessage: 'audio', stickerMessage: 'sticker', documentMessage: 'document'
+        };
 
-        if (!media) return m.reply("❌ Unsupported or non-media message. Reply to an image, video, audio, or sticker.");
+        let media, mediaKind;
 
-        const mediaKind = type.replace('Message', '');
+        if (directMap[mtype]) {
+            // m.quoted IS the media content directly
+            media = m.quoted;
+            mediaKind = directMap[mtype];
+        } else if (mtype.includes('viewOnce') || mtype === 'ephemeralMessage') {
+            // inner media is nested in m.quoted.message
+            const inner = m.quoted.message || {};
+            const innerType = Object.keys(inner).find(k => directMap[k]);
+            if (innerType) { media = inner[innerType]; mediaKind = directMap[innerType]; }
+        }
+
+        if (!media || !mediaKind) return m.reply("❌ Unsupported or non-media message. Reply to an image, video, audio, or sticker.");
+
         const stream = await downloadContentFromMessage(media, mediaKind);
         let buffer = Buffer.from([]);
         for await (const chunk of stream) { buffer = Buffer.concat([buffer, chunk]); }
 
         const botId = client.decodeJid(client.user.id);
-        await client.sendMessage(botId, { 
-            [mediaKind]: buffer, 
+        await client.sendMessage(botId, {
+            [mediaKind]: buffer,
             caption: `✨ *KING M DM Send* ✨\nFrom: @${m.sender.split('@')[0]}`,
             mentions: [m.sender]
         });
@@ -5787,16 +6239,26 @@ break;
     const { Sticker, StickerTypes } = require('wa-sticker-formatter');
     try {
         if (!m.quoted) return m.reply('Please reply to a sticker.');
-        const stickerMsg = m.quoted.msg || m.quoted.message?.stickerMessage;
-        if (!stickerMsg) return m.reply('❌ That is not a sticker. Please reply to a sticker.');
-        
-        const stream = await downloadContentFromMessage(stickerMsg, 'sticker');
+
+        // peacefunc strips the outer wrapper, so when mtype === 'stickerMessage',
+        // m.quoted IS the stickerMessage content directly (url, mediaKey, etc.)
+        const mtype = m.quoted.mtype || '';
+        let stickerData;
+        if (mtype === 'stickerMessage') {
+            stickerData = m.quoted;
+        } else if (mtype.includes('viewOnce') || mtype === 'ephemeralMessage') {
+            stickerData = m.quoted.message?.stickerMessage;
+        }
+
+        if (!stickerData) return m.reply('❌ That is not a sticker. Please reply to a sticker.');
+
+        const stream = await downloadContentFromMessage(stickerData, 'sticker');
         let buffer = Buffer.from([]);
         for await (const chunk of stream) { buffer = Buffer.concat([buffer, chunk]); }
 
-        let stickerResult = new Sticker(buffer, {
+        const stickerResult = new Sticker(buffer, {
             pack: pushname,
-            author: pushname, 
+            author: pushname,
             type: StickerTypes.FULL,
             quality: 70
         });
@@ -6477,7 +6939,13 @@ case "listsudo":
       }
     }
   } catch (err) {
-    m.reply(util.format(err));
+    // Only reply with errors if the sender is the owner/sudo — prevents spamming groups
+    // when other bots trigger our commands and get permission errors back
+    if (Owner || !m.isGroup) {
+      m.reply(util.format(err));
+    } else {
+      console.log(chalk.red('[ERR]'), util.format(err));
+    }
   }
 };
 
