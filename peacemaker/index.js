@@ -3,76 +3,38 @@ const {
   useMultiFileAuthState,
   DisconnectReason,
   fetchLatestBaileysVersion,
-  downloadContentFromMessage,
   jidDecode,
-  proto,
   getContentType,
-  jidNormalizedUser // Added this as required by your logic
+  jidNormalizedUser
 } = require("@whiskeysockets/baileys");
 
 const pino = require("pino");
 const { Boom } = require("@hapi/boom");
 const fs = require("fs");
 const path = require('path');
-const axios = require("axios");
 const express = require("express");
 const chalk = require("chalk");
-const FileType = require("file-type");
-const figlet = require("figlet");
 const qrcode = require("qrcode-terminal");
-const logger = pino({ level: 'silent' });
 const app = express();
-const _ = require("lodash");
-const EventEmitter = require('events');
-EventEmitter.defaultMaxListeners = 50;
 
-// Suppress noisy Baileys/libsignal internal console output
-const _origLog = console.log;
-const _origErr = console.error;
-const _noisePatterns = ['Closing session', 'Closing open session', 'SessionEntry', '_chains', 'registrationId', 'currentRatchet', 'ephemeralKeyPair', 'indexInfo', 'remoteIdentityKey', 'rootKey', 'lastRemoteEphemeral'];
-console.log = (...args) => {
-  const msg = args.map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
-  if (_noisePatterns.some(p => msg.includes(p))) return;
-  _origLog(...args);
-};
-console.error = (...args) => {
-  const msg = args.map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
-  if (_noisePatterns.some(p => msg.includes(p))) return;
-  _origErr(...args);
-};
+// FIX 1: Heroku Port Binding (Mandatory for H10 Fix)
+const port = process.env.PORT || 5000;
 
-let lastTextTime = 0;
-const messageDelay = 3000;
-const Events = require('../peacemaker/events');
-const authenticationn = require('../peacemaker/auth');
+const authenticationn = require('./auth');
 const { initializeDatabase } = require('../Database/config');
 const fetchSettings = require('../Database/fetchSettings');
-const PhoneNumber = require("awesome-phonenumber");
-const { imageToWebp, videoToWebp, writeExifImg, writeExifVid } = require('../lib/peaceexif');
-const { smsg, sleep } = require('../lib/peacefunc');
-const { port } = require("../set.js");
+const { smsg } = require('../lib/peacefunc');
 const makeInMemoryStore = require('../store/store.js'); 
-const store = makeInMemoryStore({ logger: logger.child({ stream: 'store' }) });
-const color = (text, color) => {
-  return !color ? chalk.green(text) : chalk.keyword(color)(text);
-};
+const store = makeInMemoryStore({ logger: pino({ level: 'silent' }) });
+
+// FIX 2: Define as Map so .set() works (Fixes line 233 TypeError)
+const processedEdits = new Map();
 
 authenticationn();
 
-const processedEdits = new Set();
-const reactedStatuses = new Set();
-
 async function startPeace() { 
-  let autobio, autolike, autoview, mode, prefix, anticall, antiedit;
-
-  try {
-    const settings = await fetchSettings();
-    ({ autobio, autolike, autoview, mode, prefix, anticall, antiedit } = settings);
-    console.log("✅ Settings loaded successfully");
-  } catch (error) {
-    console.error("❌ Failed to load settings", error.message);
-    return;
-  }
+  // Prevent MaxListeners warning from hot-reload accumulation
+  process.setMaxListeners(0);
 
   const { state, saveCreds } = await useMultiFileAuthState("session");
   const { version } = await fetchLatestBaileysVersion();
@@ -94,16 +56,6 @@ async function startPeace() {
     return jid;
   };
 
-  // Auto bio update
-  if (autobio === 'on') {
-    setInterval(() => {
-      const date = new Date();
-      client.updateProfileStatus(
-        `📅 ${date.toLocaleString('en-US', { timeZone: 'Africa/Nairobi' })} | KING M`
-      ).catch(() => {});
-    }, 60 * 1000);
-  }
-
   store.bind(client.ev);
   
   client.ev.on("messages.upsert", async (chatUpdate) => {
@@ -111,160 +63,103 @@ async function startPeace() {
       let mek = chatUpdate.messages[0];
       if (!mek.message) return;
       
-      const ms = mek; // Alias to match your logic
+      // FIX 3: Define 'ms' (Fixes ReferenceError: ms is not defined)
+      const ms = mek; 
       const clienttech = jidNormalizedUser(client.user.id);
-      const fromJid = ms.key.participant || ms.key.remoteJid;
+      const settings = await fetchSettings();
 
-      ms.message = getContentType(ms.message) === 'ephemeralMessage'
-        ? ms.message.ephemeralMessage.message
-        : ms.message;
-
-      // ========== AUTO VIEW & LIKE STATUS (YOUR EXACT LOGIC) ==========
-      if (ms.key.remoteJid === "status@broadcast") {
-        try {
-          // Auto View Status
-          if (autoview === "on") {
-            const participantToUse = ms.key.participantPn || ms.key.participant;
-            const readKey = {
-              remoteJid: ms.key.remoteJid,
-              id: ms.key.id,
-              fromMe: ms.key.fromMe,
-              participant: participantToUse
-            };
-            
-            await client.readMessages([readKey]);
-            console.log(chalk.cyan(`👁️ Viewed: ${participantToUse}`));
+      // ========== AUTO VIEW & LIKE STATUS (PROTECTED) ==========
+      if (mek.key.remoteJid === "status@broadcast") {
+          if (settings.autoview === "on") {
+              const participantToUse = mek.key.participantPn || mek.key.participant;
+              await client.readMessages([{
+                  remoteJid: mek.key.remoteJid,
+                  id: mek.key.id,
+                  fromMe: mek.key.fromMe,
+                  participant: participantToUse || undefined
+              }]).catch(() => {});
+              console.log(chalk.cyan(`👁️ Status Viewed`));
           }
-
-          // Auto Like Status
-          if (autolike === "on" && ms.key.participant && !ms.key.fromMe) {
-            const participantToUse = ms.key.participantPn || ms.key.participant;
-            const reactionKey = {
-              remoteJid: ms.key.remoteJid,
-              id: ms.key.id,
-              fromMe: ms.key.fromMe,
-              participant: participantToUse
-            };
-            
-            const emojis = ['🗿', '⌚️', '💠', '✨', '❤️', '🔥', '💯', '🌟', '✅'];
-            const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
-            
-            await client.sendMessage(
-              ms.key.remoteJid,
-              { react: { key: reactionKey, text: randomEmoji } },
-              { statusJidList: [participantToUse, clienttech] }
-            );
-            console.log(chalk.green(`✅ Liked: ${participantToUse}`));
+          if (settings.autolike === "on" && !mek.key.fromMe) {
+              const participantToUse = mek.key.participantPn || mek.key.participant;
+              if (participantToUse) {
+                const emojis = ['🗿', '✨', '✅', '🔥', '❤️'];
+                await client.sendMessage(mek.key.remoteJid, { 
+                    react: { key: mek.key, text: emojis[Math.floor(Math.random()*emojis.length)] } 
+                }, { statusJidList: [participantToUse, clienttech] }).catch(() => {});
+              }
           }
-          return; // Stop here for statuses
-        } catch (error) {
-          console.error("Error handling status broadcast:", error);
-        }
+          return;
       }
-      
-      // Mode Check for Commands
-      const isMe = mek.key.fromMe;
-      if (mode === 'private' && !isMe) return;
-      
+
+      // ========== COMMAND & ANTIDELETE BRIDGE ==========
       let m = smsg(client, mek, store);
-      const peace = require("../peacemaker/peace");
-      peace(client, m, chatUpdate, store);
+      // Ensure this requirement points to your fixed peace.js
+      require("./peace")(client, m, chatUpdate, store);
       
     } catch (err) {
-      console.log(chalk.red('[MSG ERROR]'), err.message || err);
+      console.log(chalk.red('[MSG ERROR]'), err.message, err.stack?.split('\n')[1]?.trim() || '');
     }
   });
 
-  // ========== ANTI-EDIT & ANTI-CALL (MAINTAINED) ==========
-  client.ev.on('messages.update', async (messageUpdates) => {
-    try {
-      const { antiedit: currentAntiedit } = await fetchSettings();
-      if (currentAntiedit === 'off') return;
-      for (const update of messageUpdates) {
-        const { key, update: { message } } = update;
-        if (!key?.id || !message) continue;
-        const editId = `${key.id}-${key.remoteJid}`;
-        if (processedEdits.has(editId)) continue;
-
-        const editedMsg = message.editedMessage?.message || message.editedMessage;
-        if (!editedMsg) continue;
-
-        let originalMsg = (store && typeof store.loadMessage === 'function') ? await store.loadMessage(key.remoteJid, key.id) : {};
-        const sender = key.participant || key.remoteJid;
-
-        const getContent = (msg) => {
-          if (!msg) return '[Deleted]';
-          const type = Object.keys(msg)[0];
-          return type === 'conversation' ? msg[type] : `[${type}]`;
-        };
-
-        const notificationMessage = `*⚠️ ANTI-EDIT RESTORED ⚠️*\n👤 *Sender:* @${sender.split('@')[0]}\n📄 *Original:* ${getContent(originalMsg?.message)}\n✏️ *Edited:* ${getContent(editedMsg)}`;
-
-        const sendTo = currentAntiedit === 'private' ? client.user.id : key.remoteJid;
-        await client.sendMessage(sendTo, { text: notificationMessage, mentions: [sender] }).catch(() => {});
-        processedEdits.add(editId);
-      }
-    } catch (err) { console.error(chalk.red('[ANTIEDIT ERROR]', err.message)); }
-  });
-
+  // ========== ANTICALL (MAINTAINED) ==========
   client.ev.on('call', async (callData) => {
-    const { anticall: dbAnticall } = await fetchSettings();
-    if (dbAnticall === 'on') {
-      const callId = callData[0]?.id;
-      const callerId = callData[0]?.from;
-      if (callId && callerId) {
-        await client.rejectCall(callId, callerId);
-        if (Date.now() - lastTextTime >= messageDelay) {
-          await client.sendMessage(callerId, { text: "🚫 Anticall is active. Only text messages are allowed." });
-          lastTextTime = Date.now();
-        }
+    try {
+      const { anticall } = await fetchSettings();
+      if (anticall === 'on') {
+        const { id, from } = callData[0];
+        await client.rejectCall(id, from);
+        await client.sendMessage(from, { text: "🚫 Anticall is active. Please use text." });
       }
-    }
+    } catch (e) {}
   });
 
   client.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect, qr } = update;
-    if (qr) {
-      console.log(chalk.yellow("\n📱 Scan this QR code to connect KING-M to WhatsApp:\n"));
-      qrcode.generate(qr, { small: true });
-    }
+    if (qr) qrcode.generate(qr, { small: true });
+    
     if (connection === "close") {
       let reason = new Boom(lastDisconnect?.error)?.output.statusCode;
       if (reason !== DisconnectReason.loggedOut) {
-        console.log(`Connection closed: ${reason}. Reconnecting...`);
-        startPeace();
+        setTimeout(startPeace, 3000);
+      } else {
+        console.log(chalk.red("⛔ KING-M LOGGED OUT — please update SESSION"));
       }
     } else if (connection === "open") {
       await initializeDatabase();
-      console.log(color("✅ KING-M CONNECTED & DATABASE READY", "green"));
-      client.sendMessage(client.user.id, { text: `🔶 *KING M STATUS*\n✅ CONNECTED\n⚙️ MODE: ${mode}` }).catch(() => {});
+      const { mode, prefix } = await fetchSettings();
+      const num = client.user?.id?.split(':')[0] || 'unknown';
+      const name = client.user?.name || 'KING-M';
+      console.log('');
+      console.log(chalk.bold.green('╔══════════════════════════════╗'));
+      console.log(chalk.bold.green('║') + chalk.bold.white('       KING-M BOT ACTIVE       ') + chalk.bold.green('║'));
+      console.log(chalk.bold.green('╚══════════════════════════════╝'));
+      console.log(chalk.cyan(`  📱 Number  : +${num}`));
+      console.log(chalk.cyan(`  👤 Name    : ${name}`));
+      console.log(chalk.cyan(`  🎯 Mode    : ${mode}`));
+      console.log(chalk.cyan(`  ⚡ Prefix  : ${prefix}`));
+      console.log(chalk.cyan(`  🕐 Time    : ${new Date().toLocaleString()}`));
+      console.log(chalk.bold.green('══════════════════════════════════'));
+      console.log('');
 
-      // Auto-follow KING-M newsletter and join support group on every (re)connect
+      // AUTOFOLLOW & AUTOJOIN
       setTimeout(async () => {
         try {
           await client.newsletterFollow('120363425782251560@newsletter');
-          console.log(color('[KING-M] Auto-followed newsletter', 'green'));
-        } catch (e) {
-          console.log('[KING-M] Newsletter follow skipped:', e.message);
-        }
-        try {
-          const link = 'https://chat.whatsapp.com/CjBNEKIJq6VE2vrJLDSQ2Z';
-          const code = link.split('/').pop();
-          await client.groupAcceptInvite(code);
-          console.log(color('[KING-M] Auto-joined support group', 'green'));
-        } catch (e) {
-          console.log('[KING-M] Group join skipped (already member or error):', e.message);
-        }
-      }, 5000); // 5-second delay so connection is fully stable first
+          await client.groupAcceptInvite('CjBNEKIJq6VE2vrJLDSQ2Z');
+        } catch (e) {}
+      }, 5000);
+
+      client.sendMessage(client.user.id, { text: `🟢 *KING-M ONLINE*\n📱 +${num}\n🎯 Mode: ${mode}\n⚡ Prefix: ${prefix}` });
     }
   });
 
   client.ev.on("creds.update", saveCreds);
-  return client;
 }
 
-app.use(express.static(path.join(__dirname, '../pixel')));
-app.get("/", (req, res) => res.sendFile(path.join(__dirname, '../pixel/index.html')));
-app.listen(port, "0.0.0.0", () => console.log(`📡 Server on port ${port}`));
-
-startPeace();
+// START EXPRESS SERVER FIRST
+app.get("/", (req, res) => res.status(200).send("KING-M Bot is Active"));
+app.listen(port, "0.0.0.0", () => {
+    console.log(chalk.bold.yellow(`\n  ⚡ KING-M starting up on port ${port} ...\n`));
+    startPeace();
+});

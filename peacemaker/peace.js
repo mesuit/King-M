@@ -12,7 +12,38 @@ const Genius = require("genius-lyrics");
 const yts = require("yt-search");
 let lastTextTime = 0;
 const messageDelay = 3000;
-// Add these helper functions at the top of peacemaker/peace.js
+
+// Polyfill for downloadAndSaveMediaMessage (removed in newer Baileys)
+const _downloadAndSave = async (client, msg) => {
+    let buf;
+    // msg may be an smsg-enhanced m.quoted (inner media content, not a WAMessage).
+    // fakeObj is the proper WAMessage ({key, message}) built by peacefunc.js.
+    // downloadMediaMessage requires a WAMessage — use fakeObj when available.
+    const waMsg = msg.fakeObj || msg;
+    try {
+        buf = await downloadMediaMessage(waMsg, 'buffer', {});
+    } catch (e) {
+        // Fallback: stream directly from the inner media message fields
+        const rawMtype = msg.mtype || '';
+        const rawMime = msg.mimetype || '';
+        let mtype = 'document';
+        if (rawMtype.includes('image') || rawMime.startsWith('image')) mtype = 'image';
+        else if (rawMtype.includes('video') || rawMime.startsWith('video')) mtype = 'video';
+        else if (rawMtype.includes('audio') || rawMime.startsWith('audio')) mtype = 'audio';
+        else if (rawMtype.includes('sticker')) mtype = 'image';
+        const mediaMsg = waMsg.message?.[Object.keys(waMsg.message || {})[0]] || msg;
+        const stream = await downloadContentFromMessage(mediaMsg, mtype);
+        buf = Buffer.from([]);
+        for await (const chunk of stream) buf = Buffer.concat([buf, chunk]);
+    }
+    const mime = (msg.mimetype || msg.msg?.mimetype || 'application/octet-stream');
+    const ext = mime.split('/')[1]?.split(';')[0] || 'bin';
+    const tmpDir = require('path').join(__dirname, '../tmp');
+    if (!require('fs').existsSync(tmpDir)) require('fs').mkdirSync(tmpDir, { recursive: true });
+    const tmpFile = require('path').join(tmpDir, `km_${Date.now()}.${ext}`);
+    require('fs').writeFileSync(tmpFile, buf);
+    return tmpFile;
+};
 
 // Updated logError in peacemaker/peace.js
 const logError = (command, err) => {
@@ -59,7 +90,7 @@ const {
   antilink,
   antilinkall,
   antidelete,
-  gptdm,
+  chatbot,
   badword,
   antibot,
   antitag,
@@ -67,24 +98,24 @@ const {
         antisticker,
         autolike_emojis,
         antigroupmention,
+    antistatus,
         antimention,
-        antiforward
+        antiforward,
+        autoreact
 } = await fetchSettings(); 
           
-    var body =
-      m.mtype === "conversation"
-        ? m.message.conversation
-        : m.mtype == "extendedTextMessage"
-        ? m.message.extendedTextMessage.text
-        : m.mtype == "buttonsResponseMessage"
-        ? m.message.buttonsResponseMessage.selectedButtonId
-        : m.mtype == "listResponseMessage"
-        ? m.message.listResponseMessage.singleSelectReply.selectedRowId
-        : m.mtype == "templateButtonReplyMessage"
-        ? m.message.templateButtonReplyMessage.selectedId
-        : m.mtype === "messageContextInfo"
-        ? m.message.buttonsResponseMessage?.selectedButtonId || m.message.listResponseMessage?.singleSelectReply.selectedRowId || m.text
-        : "";
+    var body = (() => {
+      try {
+        if (!m.message) return "";
+        if (m.mtype === "conversation") return m.message.conversation || "";
+        if (m.mtype === "extendedTextMessage") return m.message.extendedTextMessage?.text || "";
+        if (m.mtype === "buttonsResponseMessage") return m.message.buttonsResponseMessage?.selectedButtonId || "";
+        if (m.mtype === "listResponseMessage") return m.message.listResponseMessage?.singleSelectReply?.selectedRowId || "";
+        if (m.mtype === "templateButtonReplyMessage") return m.message.templateButtonReplyMessage?.selectedId || "";
+        if (m.mtype === "messageContextInfo") return m.message.buttonsResponseMessage?.selectedButtonId || m.message.listResponseMessage?.singleSelectReply?.selectedRowId || m.text || "";
+        return "";
+      } catch (_) { return ""; }
+    })();
     var budy = typeof m.text == "string" ? m.text : "";
     var msgR = m.message.extendedTextMessage?.contextInfo?.quotedMessage;  
 //========================================================================================================================//
@@ -99,21 +130,39 @@ const {
 } = require('../Database/config');
 //========================================================================================================================//      
     const Heroku = require("heroku-client");  
-    const command = body.replace(prefix, "").trim().split(/ +/).shift().toLowerCase();
-    const args = body.trim().split(/ +/).slice(1);
+    
+    // Use budy (m.text from smsg) as primary source — it handles ALL WhatsApp message types.
+    // Fall back to body only if budy is empty (e.g. media-only messages).
+    const messageBody = budy || body || ""; 
+    const command = messageBody.startsWith(prefix) 
+        ? messageBody.replace(prefix, "").trim().split(/ +/).shift().toLowerCase() 
+        : "";
+
+    const args = messageBody.trim().split(/ +/).slice(1);
     const pushname = m.pushName || "No Name";
     const botNumber = await client.decodeJid(client.user.id);
-    const itsMe = m.sender == botNumber ? true : false;
+    const itsMe = m.sender == botNumber;
     let text = (q = args.join(" "));
-    const arg = budy.trim().substring(budy.indexOf(" ") + 1);
+    
+    // FIX 2: Define 'Owner' immediately to prevent line 6927 ReferenceError
+    
+    const arg = (budy || "").trim().substring((budy || "").indexOf(" ") + 1);
     const arg1 = arg.trim().substring(arg.indexOf(" ") + 1);
     m.isBaileys = m.id.startsWith("BAE5") && m.id.length === 16;
     const from = m.chat;
     const reply = m.reply;
     const sender = m.sender;
-          if (m.isGroup && m.key.id.startsWith("BAE5") && m.sender !== botNumber + "@s.whatsapp.net") {
-        return; 
-    }
+
+    // ── CRITICAL GUARD: never process the bot's own automated messages ───────
+    // m.isBaileys  = auto-sent by Baileys engine (chatbot replies, reactions, warnings)
+    // m.fromMe     = sent FROM the bot's own phone number
+    //
+    // RULE: Block Baileys auto-messages always.
+    // Allow fromMe COMMANDS (starts with prefix) — owner uses the bot's own phone.
+    // Block fromMe NON-commands in public mode (prevents chatbot reply loops).
+    if (m.isBaileys) return;
+    if (m.fromMe && mode !== 'self' && !messageBody.startsWith(prefix)) return;
+    // ─────────────────────────────────────────────────────────────────────────
     const mek = chatUpdate.messages[0];
           // ==================================
 const ownerNumber = botNumber.replace(/[^0-9]/g, "");   
@@ -141,7 +190,7 @@ const dev = "254769995625";
 //========================================================================================================================//      
     const mime = (quoted.msg || quoted).mimetype || "";
     const qmsg = (quoted.msg || quoted);
-    const cmd = body.startsWith(prefix);
+    const cmd = messageBody.startsWith(prefix);
 
 //========================================================================================================================//                  
 //========================================================================================================================//          
@@ -216,14 +265,21 @@ function handleIncomingMessage(message) {
           
           // ================== ANTIDELETE FUNCTION ==================
           // ================== SIMPLE ANTIDELETE SYSTEM ==================
+// ================== FIXED ANTIDELETE SYSTEM ==================
+// ================== FIXED STABLE ANTIDELETE SYSTEM ==================
 const messageStore = new Map();
+const deletionProcessed = new Set();
+const editProcessed = new Set();
 
+// Auto-clean the dedup sets every 60 seconds
+setInterval(() => { deletionProcessed.clear(); editProcessed.clear(); }, 60000);
+
+// Helper to store only valid messages
 function storeIncomingMessage(mek) {
-    if (!mek?.key?.id) return;
-
+    if (!mek?.key?.id || mek.message?.protocolMessage) return; 
     messageStore.set(mek.key.id, mek);  
-
-    if (messageStore.size > 3000) {  
+    // Keep memory safe: store last 2000 msgs
+    if (messageStore.size > 2000) {  
         const firstKey = messageStore.keys().next().value;  
         messageStore.delete(firstKey);  
     }
@@ -231,140 +287,130 @@ function storeIncomingMessage(mek) {
 
 async function handleDeletedMessage(client, mek, antideleteMode) {
     try {
-        if (!mek?.message?.protocolMessage?.key?.id) return;
-
-        const deletedMsgId = mek.message.protocolMessage.key.id;  
+        const deletedMsgId = mek.message.protocolMessage.key.id;
+        if (deletionProcessed.has(deletedMsgId)) return; // dedup
+        deletionProcessed.add(deletedMsgId);
+        // If the bot itself sent this deletion (e.g. antisticker), never restore it
+        if (mek.key.fromMe) return;
         const originalMessage = messageStore.get(deletedMsgId);  
         if (!originalMessage) return;  
 
         const remoteJid = mek.key.remoteJid;  
         const botJid = client.user.id.split(":")[0] + "@s.whatsapp.net";  
-
         const deletedBy = mek.participant || remoteJid;  
         const sentBy = originalMessage.key.participant || originalMessage.key.remoteJid;  
 
+        // Don't report if the bot deleted it or the bot sent it
         if (deletedBy === botJid || sentBy === botJid) return;  
 
-        let targetJid;  
-        // Note: Ensure 'owner' is defined in your global scope/settings
-        if (antideleteMode === "private") {  
-            targetJid = owner[0].replace(/[^0-9]/g, '') + "@s.whatsapp.net";  
-        } else if (antideleteMode === "chat") {  
-            targetJid = remoteJid;  
-        } else return;  
-
-        const deletedByTag = `@${deletedBy.split('@')[0]}`; 
-        const sentByTag = `@${sentBy.split('@')[0]}`; 
-
+        // Fetch owner from settings safely
+        const adSettings = await fetchSettings();
+        const ownerNum = adSettings.owner?.[0]?.replace(/[^0-9]/g, '') || '';
+        const ownerJid = ownerNum ? ownerNum + '@s.whatsapp.net' : null;
+        let targetJid = (antideleteMode === "private" && ownerJid) ? ownerJid : remoteJid;
+        if (!targetJid) return;
+        
         const now = new Date();  
-        const deletedTime = now.toLocaleTimeString();  
-        const deletedDate = now.toLocaleDateString();  
-
-        let header = `🚨 KING M ANTIDELETE 🚨
-
-👤 Deleted By: ${deletedByTag}
-✉️ Sent By: ${sentByTag}
-📅 Date: ${deletedDate}
-⏰ Time: ${deletedTime}
-
-`;
+        let header = `🚨 *KING M ANTIDELETE* 🚨\n\n` +
+                     `👤 *Deleted By:* @${deletedBy.split('@')[0]}\n` +
+                     `✉️ *Sent By:* @${sentBy.split('@')[0]}\n` +
+                     `⏰ *Time:* ${now.toLocaleTimeString()}\n\n`;
 
         const msg = originalMessage.message;  
 
-        if (msg?.conversation) {  
-            await client.sendMessage(targetJid, {  
-                text: header + "📝 Deleted Message:\n" + msg.conversation,  
-                mentions: [deletedBy, sentBy]  
-            });  
-        }  
-        else if (msg?.extendedTextMessage?.text) {  
-            await client.sendMessage(targetJid, {  
-                text: header + "📝 Deleted Message:\n" + msg.extendedTextMessage.text,  
-                mentions: [deletedBy, sentBy]  
-            });  
-        }  
-        else if (msg?.imageMessage) {  
-            const buffer = await client.downloadMediaMessage(originalMessage);  
-            await client.sendMessage(targetJid, {  
-                image: buffer,  
-                caption: header + "🖼️ Deleted Image\n" + (msg.imageMessage.caption || ""),  
-                mentions: [deletedBy, sentBy]  
-            });  
-        }  
-        else if (msg?.videoMessage) {  
-            const buffer = await client.downloadMediaMessage(originalMessage);  
-            await client.sendMessage(targetJid, {  
-                video: buffer,  
-                caption: header + "🎥 Deleted Video\n" + (msg.videoMessage.caption || ""),  
-                mentions: [deletedBy, sentBy]  
-            });  
-        }  
-        else if (msg?.audioMessage) {  
-            const buffer = await client.downloadMediaMessage(originalMessage);  
-            await client.sendMessage(targetJid, {  
-                audio: buffer,  
-                mimetype: "audio/mpeg",  
-                ptt: msg.audioMessage.ptt || false  
-            });  
+        // Send content based on type
+        if (msg?.conversation || msg?.extendedTextMessage?.text) {  
+            let textContent = msg?.conversation || msg?.extendedTextMessage?.text;
+            await client.sendMessage(targetJid, { text: header + "📝 *Message:* " + textContent, mentions: [deletedBy, sentBy] });  
+        } else {
+            // For media, use standalone downloadMediaMessage (not client method)
+            const buffer = await downloadMediaMessage(originalMessage, 'buffer', {});
+            if (msg?.imageMessage) await client.sendMessage(targetJid, { image: buffer, caption: header + "🖼️ *Deleted Photo*", mentions: [deletedBy, sentBy] });
+            else if (msg?.videoMessage) await client.sendMessage(targetJid, { video: buffer, caption: header + "🎥 *Deleted Video*", mentions: [deletedBy, sentBy] });
+            else if (msg?.stickerMessage) await client.sendMessage(targetJid, { sticker: buffer });
+            else if (msg?.audioMessage) await client.sendMessage(targetJid, { audio: buffer, mimetype: "audio/mpeg" });
+        }
 
-            await client.sendMessage(targetJid, {  
-                text: header + "🎧 Deleted Audio",  
-                mentions: [deletedBy, sentBy]  
-            });  
-        }  
-        else if (msg?.stickerMessage) {  
-            const buffer = await client.downloadMediaMessage(originalMessage);  
-            await client.sendMessage(targetJid, { sticker: buffer });  
-
-            await client.sendMessage(targetJid, {  
-                text: header + "🔖 Deleted Sticker",  
-                mentions: [deletedBy, sentBy]  
-            });  
-        }  
-        else if (msg?.documentMessage) {  
-            const buffer = await client.downloadMediaMessage(originalMessage);  
-            const doc = msg.documentMessage;  
-
-            await client.sendMessage(targetJid, {  
-                document: buffer,  
-                fileName: doc.fileName,  
-                mimetype: doc.mimetype,  
-                caption: header + `📄 *Deleted Document:* ${doc.fileName}`,  
-                mentions: [deletedBy, sentBy]  
-            });  
-        }  
-
-        messageStore.delete(deletedMsgId);  
-
+        messageStore.delete(deletedMsgId); // Clear after retrieval
     } catch (err) {  
-        logError('AntiDelete', err);  
+        // silently ignore antidelete errors
     }
 }
 
+// THIS IS THE MAIN LISTENER - Put this at the very end of peace.js logic
 client.ev.on('messages.upsert', async ({ messages }) => {
-    try {
-        const mek = messages[0];
-        if (!mek.message) return;
+    const mek = messages[0];
+    if (!mek.message) return;
 
-        const antidelete = client.settings?.antidelete || "off";  
+    // Fetch the setting
+    const settings = await fetchSettings();
+    const antidelete = settings.antidelete || "off";
+    const antieditMode = settings.antiedit || "off";
 
-        if (antidelete !== "off") {  
-            if (  
-                mek.message?.protocolMessage &&  
-                mek.message.protocolMessage.type === 0  
-            ) {
-                // Skip delete notifications that arrived before bot started (reconnect flood)
-                const msgTime = (mek.messageTimestamp || 0) * 1000;
-                if (msgTime < BOT_START_TIME) return;
-                await handleDeletedMessage(client, mek, antidelete);  
-            }  
-            else {  
-                storeIncomingMessage(mek);  
-            }  
-        }  
+    if (antidelete !== "off") {
+        if (mek.message?.protocolMessage?.type === 0) {
+            // It's a deletion!
+            await handleDeletedMessage(client, mek, antidelete);
+        } else {
+            // It's a normal message, store it.
+            storeIncomingMessage(mek);
+        }
+    }
 
-    } catch (err) {  
-        logError('Listener', err);  
+    // ===== ANTIEDIT HANDLER =====
+    if (antieditMode !== "off") {
+        // Edited messages come as protocolMessage type 14
+        const isEdit = mek.message?.protocolMessage?.type === 14;
+        const editedMsgId = isEdit ? mek.message.protocolMessage.key.id : null;
+        const editedProto = isEdit ? mek.message.protocolMessage.editedMessage : null;
+
+        if (isEdit && editedProto) {
+            try {
+                if (editProcessed.has(editedMsgId)) return; // dedup
+                editProcessed.add(editedMsgId);
+                if (mek.key.fromMe) return; // ignore bot's own edits
+                const originalMessage = messageStore.get(editedMsgId);
+                const editorJid = mek.participant || mek.key.remoteJid;
+                const remoteJid = mek.key.remoteJid;
+                const botJid = client.user.id.split(':')[0] + '@s.whatsapp.net';
+
+                // Don't report bot's own edits
+                if (editorJid === botJid) return;
+
+                const newText = editedProto?.conversation ||
+                    editedProto?.extendedTextMessage?.text ||
+                    editedProto?.imageMessage?.caption ||
+                    editedProto?.videoMessage?.caption ||
+                    '*(media/unsupported)*';
+
+                const oldText = originalMessage?.message?.conversation ||
+                    originalMessage?.message?.extendedTextMessage?.text ||
+                    originalMessage?.message?.imageMessage?.caption ||
+                    originalMessage?.message?.videoMessage?.caption ||
+                    '*(unknown/media)*';
+
+                const now = new Date();
+                const report =
+                    `✏️ *KING M ANTIEDIT* ✏️\n\n` +
+                    `👤 *Edited By:* @${editorJid.split('@')[0]}\n` +
+                    `⏰ *Time:* ${now.toLocaleTimeString()}\n\n` +
+                    `📝 *Before:* ${oldText}\n\n` +
+                    `✏️ *After:* ${newText}`;
+
+                const ownerNum = settings.owner?.[0]?.replace(/[^0-9]/g, '');
+                const ownerJid = ownerNum ? ownerNum + '@s.whatsapp.net' : null;
+                const targetJid = (antieditMode === 'private' && ownerJid) ? ownerJid : remoteJid;
+
+                if (!targetJid) return;
+
+                await client.sendMessage(targetJid, {
+                    text: report,
+                    mentions: [editorJid]
+                });
+            } catch (err) {
+                // silently ignore — antiedit errors are not critical
+            }
+        }
     }
 });
 //========================================================================================================================//
@@ -456,57 +502,34 @@ if (antisticker && antisticker !== 'off' && isSticker) {
 // This detects when someone mentions the group in their status
 // ================== ANTI-GROUP MENTION MONITOR ==================
 // This runs on every message to catch status mentions
-(async () => {
-    try {
-        if (!m.isGroup) return;
+//=========================================== ANTI-GROUP MENTION (DELETE & WARN ONLY) =========================================================//
 
-        const isStatusMention = m.message?.groupStatusMentionMessage || 
-            (m.message?.extendedTextMessage?.contextInfo && 
-             !m.message.extendedTextMessage.contextInfo.isForwarded && 
-             m.message?.extendedTextMessage?.text?.includes(m.chat.split('@')[0]));
+// Detects @status, @0, and the Group JID (the hidden tag-all method)
+//=========================== ANTI-STATUS MENTION LISTENER ===========================//
+if (m.isGroup && antistatus === 'on' && !isAdmin && !Owner && isBotAdmin) {
+    const isStatusTag =
+        m.mtype === 'groupStatusMentionMessage' ||
+        m.message?.groupStatusMentionMessage != null ||
+        m.msg?.groupStatusMentionMessage != null ||
+        m.msg?.contextInfo?.groupStatusMentionMessage != null ||
+        m.message?.extendedTextMessage?.contextInfo?.groupStatusMentionMessage != null ||
+        messageBody.toLowerCase().includes('@status') ||
+        (m.mentionedJid && m.mentionedJid.some(j => j === m.chat));
 
-        if (isStatusMention) {
-            const { getSettings } = require('../Database/config');
-            const settings = await getSettings();
-            
-            const groupKey = `antigm-${m.chat}`;
-            const action = settings[groupKey];
-
-            if (action && action !== 'off') {
-                
-                const gmData = await client.groupMetadata(m.chat);
-                const gmParticipants = gmData.participants;
-                const decodedSender = client.decodeJid(m.sender);
-                const senderIsAdmin = gmParticipants.find(p => client.decodeJid(p.id) === decodedSender)?.admin;
-
-                if (!senderIsAdmin) {
-                    const decodedBot = client.decodeJid(client.user.id);
-                    const botIsAdmin = gmParticipants.find(p => client.decodeJid(p.id) === decodedBot)?.admin;
-
-                    if ((action === 'delete' || action === 'kick') && botIsAdmin) {
-                        await client.sendMessage(m.chat, { delete: m.key });
-                        await client.sendMessage(m.chat, { 
-                            text: `⚠️ @${decodedSender.split('@')[0]}, do not mention this group in your status!`, 
-                            mentions: [decodedSender] 
-                        });
-                        console.log(`[ANTI-GM] Deleted status mention from ${decodedSender}`);
-                    }
-
-                    if (action === 'kick' && botIsAdmin) {
-                        await client.groupParticipantsUpdate(m.chat, [decodedSender], 'remove');
-                        await client.sendMessage(m.chat, { 
-                            text: `🚫 @${decodedSender.split('@')[0]} has been removed for mentioning the group in status.`, 
-                            mentions: [decodedSender] 
-                        });
-                        console.log(`[ANTI-GM] Kicked ${decodedSender} for status mention`);
-                    }
-                }
-            }
+    if (isStatusTag) {
+        try {
+            await client.sendMessage(m.chat, { delete: m.key });
+            await sleep(800); 
+            await client.sendMessage(m.chat, {
+                text: `⚠️ *ANTI-GROUP MENTION* @${m.sender.split('@')[0]}, tagging via status is not allowed here!`,
+                mentions: [m.sender]
+            });
+        } catch (err) {
+            console.error('Anti-Status Error:', err.message);
         }
-    } catch (e) {
-        logError('Anti-GM', e);
+        return; // Stop further processing of this message
     }
-})();
+}
 // ================================================================
 // ================================================================
  // Corrected sendContact function using available client methods
@@ -586,28 +609,83 @@ const totalcmds = () => {
     return numUpper;
 }         
 //========================================================================================================================// 
-    if (gptdm === 'on' && m.chat.endsWith("@s.whatsapp.net")) {
-if (itsMe) return;
-            
-try {
-        const currentTime = Date.now();
-          if (currentTime - lastTextTime < messageDelay) {
-            logWarn('Message skipped: Too many messages in a short time.');
-            return;
-          }
-        
-  const { default: Gemini } = await import('gemini-ai');
-  const gemini = new Gemini("AIzaSyDJUtskTG-MvQdlT4tNE319zBqLMFei8nQ");
-  const chat = gemini.createChat();
+  const chatbotActive =
+    (chatbot === 'dm' && m.chat.endsWith('@s.whatsapp.net')) ||
+    (chatbot === 'group' && m.chat.endsWith('@g.us')) ||
+    (chatbot === 'all');
 
-      const res = await chat.ask(text);
+  // Chatbot: reply to every non-command, non-self message
+  if (chatbotActive && !itsMe && budy && !budy.startsWith(prefix) && budy.trim().length >= 2) {
+    (async () => {
+        try {
+            const currentTime = Date.now();
+            if (currentTime - lastTextTime < 1500) return;
+            lastTextTime = currentTime;
 
-        await m.reply(res);
+            await client.sendPresenceUpdate('composing', m.chat);
+            const userMessage = budy.trim();
+            let aiReply = null;
 
-lastTextTime = currentTime;
-        
-    } catch (e) {
-        m.reply("I am unable to generate text\n\n" + e);
+            // Helper: safely extract string from any API response format
+            const extractText = (r) => {
+                if (!r) return null;
+                // keithai format: r.message or r.data
+                const v = r.message || r.data || r.result || r.BK9 || r.answer || r.reply || r.text || r.response;
+                if (typeof v === 'string' && v.trim().length > 1) return v.trim();
+                if (typeof r === 'string' && r.trim().length > 1) return r.trim();
+                return null;
+            };
+
+            // KeithAI is primary — fast, reliable, free
+            const aiApis = [
+                async () => {
+                    const r = await fetchJson(`https://apiskeith.top/keithai?q=${encodeURIComponent(userMessage)}`);
+                    return extractText(r);
+                },
+                async () => {
+                    const r = await fetchJson(`https://bk9.fun/ai/chatgpt?q=${encodeURIComponent(userMessage)}`);
+                    return extractText(r);
+                },
+                async () => {
+                    const r = await fetchJson(`https://api.dreaded.site/api/openai?text=${encodeURIComponent(userMessage)}`);
+                    return extractText(r);
+                },
+                async () => {
+                    const r = await fetchJson(`https://api.agatz.xyz/api/ai?message=${encodeURIComponent(userMessage)}`);
+                    return extractText(r);
+                },
+            ];
+
+            for (const apiFn of aiApis) {
+                try {
+                    aiReply = await apiFn();
+                    if (aiReply) break;
+                } catch (_) { aiReply = null; }
+            }
+
+            if (aiReply) {
+                await m.reply(aiReply);
+            }
+        } catch (e) {
+            // silently ignore chatbot errors
+        }
+    })();
+    // do NOT return — fall through so prefix commands still work
+  }
+
+//========================================================================================================================//
+// ── AUTOREACT: react to every incoming message with a random emoji ──────────
+if (autoreact && autoreact !== 'off' && !itsMe && !m.isBaileys) {
+    const inDm = m.chat.endsWith('@s.whatsapp.net');
+    const inGroup = m.chat.endsWith('@g.us');
+    const shouldReact =
+        autoreact === 'all' ||
+        (autoreact === 'dm' && inDm) ||
+        (autoreact === 'group' && inGroup);
+    if (shouldReact) {
+        const reacts = ['❤️','🔥','😂','😍','🥳','💯','✅','👏','💥','😎','🎉','🤩','🙌','💪','🫡'];
+        const randomEmoji = reacts[Math.floor(Math.random() * reacts.length)];
+        client.sendMessage(m.chat, { react: { text: randomEmoji, key: m.key } }).catch(() => {});
     }
 }
 //========================================================================================================================//
@@ -811,7 +889,7 @@ let cap = `
 │ ⬡ antitag
 │ ⬡ antilink
 │ ⬡ antilinkall
-│ ⬡ gptdm
+│ ⬡ chatbot [dm/group/all/off]
 │ ⬡ autoview
 │ ⬡ autolike
 │ ⬡ autoread
@@ -829,6 +907,7 @@ let cap = `
 │ ⬡ setreactemojie
 │ ⬡ antimention
 │ ⬡ antiforward
+│ ⬡ autoreact [dm/group/all/off]
 ┗▣
 
 ┏▣ 👑 *OWNER ACCESS* 👑
@@ -854,23 +933,21 @@ let cap = `
 ┗▣
 
 ┏▣ 📥 *DOWNLOAD SUITE* 📥
-│ ⚡ video
-│ ⚡ video2
-│ ⚡ play
-│ ⚡ play2
-│ ⚡ song
-│ ⚡ song2
-│ ⚡ fbdl
-│ ⚡ tiktok
-│ ⚡ twitter
-│ ⚡ instagram
-│ ⚡ pinterest
-│ ⚡ movie
-│ ⚡ lyrics
-│ ⚡ whatsong
-│ ⚡ yts
-│ ⚡ ytmp3
-│ ⚡ ytmp4
+│ ⚡ ytmp3/yta    — YouTube → MP3
+│ ⚡ ytmp4/ytv    — YouTube → MP4
+│ ⚡ spotify/spdt — Spotify → MP3
+│ ⚡ tiktok/tt    — TikTok video
+│ ⚡ instagram/ig — Instagram media
+│ ⚡ facebook/fb  — Facebook video
+│ ⚡ twitter      — Twitter/X video
+│ ⚡ pinterest/pin— Pinterest media
+│ ⚡ play/play2   — YouTube music
+│ ⚡ video/video2 — YouTube video
+│ ⚡ song/song2   — Song search
+│ ⚡ lyrics       — Song lyrics
+│ ⚡ shazam       — Identify a song
+│ ⚡ yts          — YouTube search
+│ ⚡ movie        — Movie info
 ┗▣
 
 ┏▣ 🧩 *CONVERTER HUB* 🧩
@@ -910,6 +987,7 @@ let cap = `
 │ 🧠 gpt2
 │ 🧠 gpt3
 │ 🧠 gpt4
+│ 🤖 chatbot dm/group/all/off  ← auto-reply
 ┗▣
 
 ┏▣ 👥 *GROUP MANAGER* 👥
@@ -1069,9 +1147,17 @@ let cap = `
 │ 🎭 animegirl
 │ 🎭 quotes
 │ 🎭 pickupline
+│ 🎭 truth       — Random truth question
+│ 🎭 dare        — Random dare challenge
+│ 🎭 wyr         — Would you rather
+│ 🎭 8ball       — Magic 8-ball
+│ 🎭 country     — Country information
+│ 🎭 currency    — Currency converter
+│ 🎭 apk         — Download Android APK
 ┗▣
 
 ┏▣ 📦 *EXTRAS* 📦
+│ ✦ getpp/pp/pfp — get profile picture
 │ ✦ bible
 │ ✦ quran
 │ ✦ pair
@@ -1298,6 +1384,7 @@ break;
                         //========================================================================================================================//
         case 'fancy':
         case 'font':
+        case 'setfont':
             try {
                 // Check if user provided arguments
                 // We use 'args' which you defined at the top of your file
@@ -1305,17 +1392,17 @@ break;
                 let textToChange = args.slice(1).join(" ");
 
                 if (!id) {
-                    // No arguments provided? Show the list of styles
                     const readMore = String.fromCharCode(8206).repeat(4001);
-                    let demoText = "King-M"; 
-                    
+                    let demoText = "King-M";
+                    let styleList = "";
+                    try { styleList = fancy.list(demoText, fancy); } catch (_) {
+                        const keys = Object.keys(fancy).filter(k => !isNaN(k));
+                        styleList = keys.map((k, i) => `${i + 1}. Style ${parseInt(k) + 1}`).join('\n');
+                    }
                     let menu = `🎨 *KING-M FANCY FONTS* 🎨\n\n` +
-                               `Usage: *${prefix}fancy [ID] [TEXT]*\n` +
-                               `Example: *${prefix}fancy 10 King-M*\n` +
-                               readMore + "\n" +
-                               fancy.list(demoText, fancy);
-                    
-                    // Using client.sendMessage to be safe
+                               `Usage: *${prefix}font [ID] [TEXT]*\n` +
+                               `Example: *${prefix}font 10 King-M*\n` +
+                               readMore + "\n" + styleList;
                     await client.sendMessage(m.chat, { text: menu }, { quoted: m });
                     break;
                 }
@@ -1388,50 +1475,28 @@ break;             //Status mention
 // ================== ANTI-GROUP MENTION COMMAND ==================
 // ================== ANTI-GROUP MENTION (DB INTEGRATED) ==================
 // ================== ANTI-GROUP MENTION COMMAND ==================
-case 'antigm':
-case 'antigroupmention':
-case 'agm': {
-    // 1. Require Database
-    const { updateSetting, getSettings } = require('../Database/config');
+case 'antistatus':
+        case 'antigroupmention': 
+        case 'antigm': {
+    if (!m.isGroup) return m.reply("This command is only for groups.");
+    if (!isAdmin && !Owner) return m.reply("Admin only command.");
+    if (!isBotAdmin) return m.reply("I need to be an admin to enforce this.");
 
-    // 2. Permissions
-    if (!m.isGroup) return reply("❌ This command is for groups only.");
-    if (!isAdmin) return reply("❌ Only Admins can use this command.");
-    if (!isBotAdmin) return reply("❌ I need to be Admin to delete/kick!");
+    if (!text) return m.reply(`Usage: ${prefix + command} on/off`);
 
-    // 3. Parse Input
-    const args = text ? text.split(" ") : [];
-    const subCmd = args[0] ? args[0].toLowerCase() : 'help';
-    const groupKey = `antigm-${m.chat}`; // Unique key for this group
-
-    // 4. Handle Options
-    if (subCmd === 'on' || subCmd === 'enable' || subCmd === 'delete') {
-        await updateSetting(groupKey, 'delete');
-        reply(`✅ *Anti-Group Mention Enabled!*\n\nMode: *Delete*\nI will delete messages if someone tags this group in their status.`);
-        
-    } else if (subCmd === 'kick') {
-        await updateSetting(groupKey, 'kick');
-        reply(`✅ *Anti-Group Mention Enabled!*\n\nMode: *Kick*\nI will REMOVE anyone who tags this group in their status.`);
-
-    } else if (subCmd === 'off' || subCmd === 'disable') {
-        await updateSetting(groupKey, 'off');
-        reply(`❌ *Anti-Group Mention Disabled.*`);
-
+    if (text.toLowerCase() === 'on') {
+        await updateSetting('antistatus', 'on');
+        await updateSetting('antigroupmention', 'on');
+        m.reply("✅ *Anti-Status Mention* has been enabled. I will now delete all 'Tag All' mentions.");
+    } else if (text.toLowerCase() === 'off') {
+        await updateSetting('antistatus', 'off');
+        await updateSetting('antigroupmention', 'off');
+        m.reply("❌ *Anti-Status Mention* has been disabled.");
     } else {
-        // Status Check
-        const settings = await getSettings();
-        const currentAction = settings[groupKey] || 'off';
-        
-        reply(`🛡️ *ANTI-GROUP MENTION*\n\n` +
-              `*Current Status:* ${currentAction.toUpperCase()}\n\n` +
-              `*Usage:*\n` +
-              `▪️ *${prefix}agm on* (Deletes status updates)\n` +
-              `▪️ *${prefix}agm kick* (Kicks the user)\n` +
-              `▪️ *${prefix}agm off* (Disables feature)`);
+        m.reply(`Use *on* to enable or *off* to disable.`);
     }
 }
-break;
-                        //togstatus
+break;                 //togstatus
                 // ================== GROUP STATUS (GS) ==================
 // ================== GROUP STATUS (GS) - REBUILT ==================
 // ================== GROUP STATUS (GS) - UPDATED ==================
@@ -1466,27 +1531,27 @@ case 'gs': {
             const q = text || ""; 
 
             if (/image/.test(mime)) {
-                const buffer = await client.downloadMediaMessage(m.quoted);
+                const buffer = await downloadMediaMessage(m.quoted.fakeObj || m.quoted, 'buffer', {});
                 tempFilePath = path.join(tempDir, `status_${Date.now()}.jpg`);
                 fs.writeFileSync(tempFilePath, buffer);
                 payload.groupStatusMessage.image = { url: tempFilePath };
                 payload.groupStatusMessage.caption = q || m.quoted.caption || "";
 
             } else if (/video/.test(mime)) {
-                const buffer = await client.downloadMediaMessage(m.quoted);
+                const buffer = await downloadMediaMessage(m.quoted.fakeObj || m.quoted, 'buffer', {});
                 tempFilePath = path.join(tempDir, `status_${Date.now()}.mp4`);
                 fs.writeFileSync(tempFilePath, buffer);
                 payload.groupStatusMessage.video = { url: tempFilePath };
                 payload.groupStatusMessage.caption = q || m.quoted.caption || "";
 
             } else if (/audio/.test(mime)) {
-                const buffer = await client.downloadMediaMessage(m.quoted);
+                const buffer = await downloadMediaMessage(m.quoted.fakeObj || m.quoted, 'buffer', {});
                 tempFilePath = path.join(tempDir, `status_${Date.now()}.mp3`);
                 fs.writeFileSync(tempFilePath, buffer);
                 payload.groupStatusMessage.audio = { url: tempFilePath };
 
             } else if (/webp/.test(mime)) {
-                const buffer = await client.downloadMediaMessage(m.quoted);
+                const buffer = await downloadMediaMessage(m.quoted.fakeObj || m.quoted, 'buffer', {});
                 tempFilePath = path.join(tempDir, `status_${Date.now()}.webp`);
                 fs.writeFileSync(tempFilePath, buffer);
                 payload.groupStatusMessage.sticker = { url: tempFilePath };
@@ -1588,15 +1653,23 @@ break;
 }
   
                       
-case "gptdm": {
-        if(!Owner) throw NotOwner;
+case "chatbot": {
+  if (!Owner) throw NotOwner;
   const settings = await getSettings();
-  const current = settings.gptdm;
-  if (!text) return reply(`🙂‍↕️ gptdm is currently *${current.toUpperCase()}*`);
-  if (!["on", "off"].includes(text)) return reply("Usage: gptdm on/off");
-  if (text === current) return reply(`✅ Gptdm is already *${text.toUpperCase()}*`);
-  await updateSetting("gptdm", text);
-  reply(`✅ Gptdm has been turned *${text.toUpperCase()}*`);
+  const current = settings.chatbot || 'off';
+  const validModes = ['off', 'dm', 'group', 'all'];
+  if (!text) return reply(
+    `🤖 *Chatbot Status:* *${current.toUpperCase()}*\n\n` +
+    `Usage: ${prefix}chatbot [dm/group/all/off]\n` +
+    `• *dm* - reply in private chats only\n` +
+    `• *group* - reply in groups only\n` +
+    `• *all* - reply everywhere\n` +
+    `• *off* - disabled`
+  );
+  if (!validModes.includes(text)) return reply(`❌ Invalid mode. Use: dm / group / all / off`);
+  if (text === current) return reply(`✅ Chatbot is already set to *${text.toUpperCase()}*`);
+  await updateSetting('chatbot', text);
+  reply(`✅ Chatbot mode set to *${text.toUpperCase()}*`);
 }
 break;
                       
@@ -3273,81 +3346,96 @@ case "king":
                 break;
 
 //========================================================================================================================//
-case "gpt4":
-           {
-        if (!text) return reply(`Hello there, what's your question?`);
-          let d = await fetchJson(
-            `https://api.bk9.dev/ai/Aoyo?q=${text}`
-          );
-          if (!d.BK9) {
+case "gpt4": {
+    if (!text) return reply(`Hello there, what's your question?`);
+
+    try {
+        // Fetching from the new Keith API
+        let d = await fetchJson(`https://apiskeith.top/ai/gpt?q=${encodeURIComponent(text)}`);
+
+        // Most APIs of this type return the result in a 'result' or 'response' field
+        // If the API returns a direct string or different key, adjust 'd.result' below
+        if (!d || !d.result) {
             return reply(
-              "An error occurred while fetching the AI chatbot response. Please try again later."
+                "An error occurred while fetching the AI chatbot response. Please try again later."
             );
-          } else {
-            reply(d.BK9);
-          }
-                     }
-                      break;
+        } else {
+            reply(d.result);
+        }
+    } catch (e) {
+        console.error(e);
+        reply("Connection to the AI service failed.");
+    }
+}
+break;
 
 //========================================================================================================================//
 case 'gpt3': {
-        if (!q) return reply("Holla, I'm listening to you..");
-try {
-        const apiUrl = `https://vapis.my.id/api/openai?q=${encodeURIComponent(q)}`;
+    if (!q) return reply("Holla, I'm listening to you..");
+
+    try {
+        // Updated to the o3 model endpoint from Keith API
+        const apiUrl = `https://apiskeith.top/ai/o3?q=${encodeURIComponent(q)}`;
         const { data } = await axios.get(apiUrl);
 
-   if (!data || !data.result) {
-            return reply("OpenAI failed to respond. Please try again later.");
+        if (!data || !data.result) {
+            return reply("The AI failed to respond. Please try again later.");
         }
-        await reply(`${data.result}`);   
-   
-} catch (e) {
-        console.error("Error in OpenAI command:", e); 
-        reply("An error occurred while communicating With API");
-    }
-};
-  break;
 
-//========================================================================================================================//                          
-case "gpt2":
-   {
-       if (!q) return reply("Hello there,  what's your question ?");
-try {
-  const apiUrl = `https://lance-frank-asta.onrender.com/api/gpt?q=${encodeURIComponent(q)}`;
-  const { data } = await axios.get(apiUrl);
+        await reply(data.result);
 
-if (!data || !data.message) {
-        return reply("Oops an error occurred!!.");
-        }
-        await reply(`${data.message}`);
     } catch (e) {
-        console.error("Error in AI command:", e);
- reply("An error occurred while communicating with API.");
+        console.error("Error in o3 AI command:", e);
+        reply("An error occurred while communicating with the API.");
     }
-}; 
-                break;
+}
+break;
+//========================================================================================================================//                          
+case "gpt2": case "qwenaai": {
+    if (!q) return reply("Hello there, what's your question?");
+
+    try {
+        // Updated to the Qwen AI endpoint
+        const apiUrl = `https://apiskeith.top/ai/qwenai?q=${encodeURIComponent(q)}`;
+        const { data } = await axios.get(apiUrl);
+
+        // Adjusted to check for data.result which is standard for this API
+        if (!data || !data.result) {
+            return reply("Oops, an error occurred while fetching the response.");
+        }
+
+        await reply(data.result);
+    } catch (e) {
+        console.error("Error in Qwen AI command:", e);
+        reply("An error occurred while communicating with the API.");
+    }
+}
+break;
 
 //========================================================================================================================//
-case 'gpt':{
+case 'gpt': case 'deepseek': {
+    if (!text) return m.reply("Hello there, what's going on ?");
 
-if (!text) return m.reply("Hello there, what's going on ?");
-        try {
-     const data = await fetchJson(`https://api.dreaded.site/api/aichat?query=${text}`);
-                
-    if (data && data.result) {
+    try {
+        // Updated to the DeepSeek-V3 endpoint
+        const data = await fetchJson(`https://apiskeith.top/ai/deepseekV3?q=${encodeURIComponent(text)}`);
+
+        // Using data.result as per the Keith API standard response structure
+        if (data && data.result) {
             const res = data.result;
             await m.reply(res);
-    } else {
-            m.reply("An error occurred!!");
+        } else {
+            m.reply("An error occurred while fetching the response.");
+        }
+    } catch (error) {
+        // Detailed error logging for debugging
+        reply('An error occurred while communicating with the API:\n' + error.message);
     }
-        } catch (error) {
-reply('An error occured while communicating with the APIs\n' + error);
 }
-  }
 break;
 
 //========================================================================================================================//                          
- case 'trt': case 'translate':{
+ case 'trt': {
 try {
     // Check if the message is quoted
     if (!m.quoted) {
@@ -3495,54 +3583,38 @@ break;
                       
 //========================================================================================================================//                  
                       case "ai": {
-                              const {
-    GoogleGenerativeAI: _0x817910
-  } = require("@google/generative-ai");
-  const _0xc0423b = require("axios");
-                      
-  try {
-    if (!m.quoted) {
-      return m.reply("𝗤𝘂𝗼𝘁𝗲 𝗮𝗻 𝗶𝗺𝗮𝗴𝗲 𝘄𝗶𝘁𝗵 𝘁𝗵𝗲 𝗶𝗻𝘀𝘁𝗿𝘂𝗰𝘁𝗶𝗼𝗻𝘀 𝗲𝗵!");
+    try {
+        // 1. Check for quoted message and text instructions
+        if (!m.quoted) return m.reply("𝗤𝘂𝗼𝘁𝗲 𝗮𝗻 𝗶𝗺𝗮𝗴𝗲 𝘄𝗶𝘁𝗵 𝘁𝗵𝗲 𝗶𝗻𝘀𝘁𝗿𝘂𝗰𝘁𝗶𝗼𝗻𝘀 𝗲𝗵!");
+        if (!text) return m.reply("𝗣𝗿𝗼𝘃𝗶𝗱𝗲 𝘀𝗼𝗺𝗲 𝗶𝗻𝘀𝘁𝗿𝘂𝗰𝘁𝗶𝗼𝗻𝘀 𝗲𝗵!");
+
+        // 2. Validate that the quoted media is an image
+        const mime = (m.quoted.msg || m.quoted).mimetype || '';
+        if (!/image/.test(mime)) return m.reply("𝗛𝘂𝗵 𝘁𝗵𝗶𝘀 𝗶𝘀 𝗻𝗼𝘁 𝗮𝗻 𝗶𝗺𝗮𝗴𝗲!");
+
+        m.reply("𝗔 𝗺𝗼𝗺𝗲𝗻𝘁, 𝗹𝗲𝗺𝗺𝗲 𝗮𝗻𝗮𝗹𝘆𝘀𝗲 𝘁𝗵𝗲 𝗰𝗼𝗻𝘁𝗲𝗻𝘁𝘀 𝗼𝗳 𝘁𝗵𝗲 𝗜𝗺𝗮𝗴𝗲...");
+
+        // 3. Download the image and upload to Catbox (or your preferred uploader)
+        let media = await _downloadAndSave(client, m.quoted);
+        let imageUrl = await uploadToCatbox(media);
+
+        // 4. Call the Keith AI Vision API
+        const apiUrl = `https://apiskeith.top/ai/vision?image=${encodeURIComponent(imageUrl)}&q=${encodeURIComponent(text)}`;
+        const { data } = await axios.get(apiUrl);
+
+        // 5. Send the response
+        if (data && data.result) {
+            await m.reply(data.result);
+        } else {
+            m.reply("The AI failed to analyze the image. Please try again later.");
+        }
+
+    } catch (error) {
+        console.error("Error in Vision command:", error);
+        m.reply("I am unable to analyze images at the moment.\n" + error.message);
     }
-    if (!text) {
-      return m.reply("𝗣𝗿𝗼𝘃𝗶𝗱𝗲 𝘀𝗼𝗺𝗲 𝗶𝗻𝘀𝘁𝗿𝘂𝗰𝘁𝗶𝗼𝗻𝘀 𝗲𝗵! 𝗧𝗵𝗶𝘀 𝗶𝘀 𝗣𝗘𝗔𝗖𝗘 𝗔𝗶, 𝘂𝘀𝗶𝗻𝗴 𝗴𝗲𝗺𝗶𝗻𝗶-𝗽𝗿𝗼-𝘃𝗶𝘀𝗶𝗼𝗻 𝘁𝗼 𝗮𝗻𝗮𝗹𝘆𝘀𝗲 𝗶𝗺𝗮𝗴𝗲𝘀.");
-    }
-    if (!/image|pdf/.test(mime)) {
-      return m.reply("𝗛𝘂𝗵 𝘁𝗵𝗶𝘀 𝗶𝘀 𝗻𝗼𝘁 𝗮𝗻 𝗶𝗺𝗮𝗴𝗲! 𝗣𝗹𝗲𝗮𝘀𝗲 𝗧𝗮𝗴 𝗮𝗻 𝗶𝗺𝗮𝗴𝗲 𝘄𝗶𝘁𝗵 𝘁𝗵𝗲 𝗶𝗻𝘀𝘁𝗿𝘂𝗰𝘁𝗶𝗼𝗻𝘀 𝗲𝗵 !");
-    }
-    let _0x3439a2 = await client.downloadAndSaveMediaMessage(m.quoted);
-    let _0x3dfb7c = await uploadToCatbox(_0x3439a2);
-    m.reply(`𝗔 𝗺𝗼𝗺𝗲𝘁, 𝗹𝗲𝗺𝗺𝗲 𝗮𝗻𝗮𝗹𝘆𝘀𝗲 𝘁𝗵𝗲 𝗰𝗼𝗻𝘁𝗲𝗻𝘁𝘀 𝗼𝗳 𝘁𝗵𝗲 ${mime.includes("pdf") ? "𝗣𝗗𝗙" : "𝗜𝗺𝗮𝗴𝗲"} ...`);
-    const _0x4e9e6a = new _0x817910("AIzaSyDJUtskTG-MvQdlT4tNE319zBqLMFei8nQ");
-    async function _0x309a3c(_0x1400ed, _0x1a081e) {
-      const _0x53e4b2 = {
-        responseType: "arraybuffer"
-      };
-      const _0x1175d9 = await _0xc0423b.get(_0x1400ed, _0x53e4b2);
-      const _0x2a4862 = Buffer.from(_0x1175d9.data).toString("base64");
-      const _0x2f6e31 = {
-        data: _0x2a4862,
-        mimeType: _0x1a081e
-      };
-      const _0x14b65d = {
-        inlineData: _0x2f6e31
-      };
-      return _0x14b65d;
-    }
-    const _0x22a6bb = {
-      model: "gemini-1.5-flash"
-    };
-    const _0x42849d = _0x4e9e6a.getGenerativeModel(_0x22a6bb);
-    const _0x2c743f = [await _0x309a3c(_0x3dfb7c, "image/jpeg")];
-    const _0xcf53e3 = await _0x42849d.generateContent([text, ..._0x2c743f]);
-    const _0x195f9c = await _0xcf53e3.response;
-    const _0x3db5a3 = _0x195f9c.text();
-    await m.reply(_0x3db5a3);
-  } catch (_0x4b3921) {
-    m.reply("I am unable to analyze images at the moment\n" + _0x4b3921);
-  }
 }
- break;
+break;
 
 //========================================================================================================================//                  
               case "ai2": {
@@ -3554,7 +3626,7 @@ if (!m.quoted) return m.reply("Send the image then tag it with the instruction."
 if (!text) return m.reply("𝗣𝗿𝗼𝘃𝗶𝗱𝗲 𝘀𝗼𝗺𝗲 𝗶𝗻𝘀𝘁𝗿𝘂𝗰𝘁𝗶𝗼𝗻𝘀 𝗲𝗵! 𝗧𝗵𝗶𝘀 KING 𝗔𝗶 𝗨𝘀𝗲 𝗚𝗲𝗺𝗶𝗻𝗶-𝗽𝗿𝗼-𝘃𝗶𝘀𝗶𝗼𝗻 𝘁𝗼 𝗮𝗻𝗮𝗹𝘆𝘀𝗲 𝗶𝗺𝗮𝗴𝗲𝘀.");
 if (!/image|pdf/.test(mime)) return m.reply("That is not an image, try again while quoting an actual image.");             
 
-                    let fdr = await client.downloadAndSaveMediaMessage(m.quoted)
+                    let fdr = await _downloadAndSave(client, m.quoted)
                     let fta = await uploadToCatbox(fdr)
                     m.reply(`𝗔 𝗠𝗼𝗺𝗲𝗻𝘁, KING[KING-M] 𝗶𝘀 𝗮𝗻𝗮𝗹𝘆𝘇𝗶𝗻𝗴 𝘁𝗵𝗲 𝗰𝗼𝗻𝘁𝗲𝗻𝘁𝘀 𝗼𝗳 𝘁𝗵𝗲 ${mime.includes("pdf") ? "𝗣𝗗𝗙" : "𝗜𝗺𝗮𝗴𝗲"} . . .`);
 
@@ -3571,36 +3643,39 @@ m.reply("I am unable to analyze images at the moment\n" + e)
                 break;
 
 //========================================================================================================================//                  
-              case "vision": {
-                      if (!msgR || !text) {
-    m.reply("𝗤𝘂𝗼𝘁𝗲 𝗮𝗻 𝗶𝗺𝗮𝗴𝗲 𝗮𝗻𝗱 𝗴𝗶𝘃𝗲 𝘀𝗼𝗺𝗲 𝗶𝗻𝘀𝘁𝗿𝘂𝗰𝘁𝗶𝗼𝗻𝘀 𝗲𝗵. 𝗜'𝗺 KING M, 𝗶 𝘂𝘀𝗲 𝗕𝗮𝗿𝗱 𝘁𝗼 𝗮𝗻𝗮𝗹𝘆𝘇𝗲 𝗶𝗺𝗮𝗴𝗲𝘀.");
-    return;
-  }
-  ;
-  let _0x44b3e0;
-  if (msgR.imageMessage) {
-    _0x44b3e0 = msgR.imageMessage;
-  } else {
-    m.reply("𝗛𝘂𝗵, 𝗧𝗵𝗮𝘁'𝘀 𝗻𝗼𝘁 𝗮𝗻 𝗶𝗺𝗮𝗴𝗲, 𝗦𝗲𝗻𝗱 𝗮𝗻 𝗶𝗺𝗮𝗴𝗲 𝘁𝗵𝗲𝗻 𝘁𝗮𝗴 𝗶𝘁 𝘄𝗶𝘁𝗵 𝘁𝗵𝗲 𝗶𝗻𝘀𝘁𝗿𝘂𝗰𝘁𝗶𝗼𝗻𝘀 !");
-    return;
-  };
-  try {
-    let _0x11f50e = await client.downloadAndSaveMediaMessage(_0x44b3e0);
-    let _0x45392d = await uploadToCatbox(_0x11f50e);
-    m.reply("𝗔 𝗺𝗼𝗺𝗲𝗻𝘁, 𝗟𝗲𝗺𝗺𝗲 𝗮𝗻𝗮𝗹𝘆𝘇𝗲 𝘁𝗵𝗲 𝗰𝗼𝗻𝘁𝗲𝗻𝘁𝘀 𝗼𝗳 𝘁𝗵𝗲 𝗶𝗺𝗮𝗴𝗲. . .");
-    let _0x4f137e = await (await fetch("https://api.bk9.dev/ai/geminiimg?url=" + _0x45392d + "&q=" + text)).json();
-    const _0x4bfd63 = {
-      text: _0x4f137e.BK9
-    };
-    await client.sendMessage(m.chat, _0x4bfd63, {
-      quoted: m
-    });
-  } catch (_0x1be711) {
-    m.reply("An error occured\n" + _0x1be711);
-  }
-}
-         break;
+              case 'vision': case 'aiimg': {
+    // Check if the user is replying to an image or if an image is sent
+    const quoted = m.quoted ? m.quoted : m;
+    const mime = (quoted.msg || quoted).mimetype || '';
 
+    if (!/image/.test(mime)) return m.reply("Please reply to an image or send an image with the command.");
+    if (!text) return m.reply("Please provide a question about the image.");
+
+    try {
+        m.reply('*Analyzing image, please wait...*');
+
+        // 1. Download the media and upload to a link (assuming you have a 'upload' function)
+        // Note: The Keith API requires a URL. You usually need to upload the image first.
+        let media = await quoted.download();
+        let link = await upload(media); // Replace with your actual upload function (Telegra.ph/Imgur)
+
+        // 2. Call the Vision API
+        const apiUrl = `https://apiskeith.top/ai/vision?image=${encodeURIComponent(link)}&q=${encodeURIComponent(text)}`;
+        const data = await fetchJson(apiUrl);
+
+        if (!data || !data.result) {
+            return m.reply("The Vision API failed to respond. Please try again later.");
+        }
+
+        // 3. Reply with the text description
+        await m.reply(data.result);
+
+    } catch (error) {
+        console.error(error);
+        m.reply("An error occurred while processing the image analysis.");
+    }
+}
+break;
 //========================================================================================================================//                  
                       case 'remini': {
                         if (!quoted) return reply(`𝗪𝗵𝗲𝗿𝗲 𝗶𝘀 𝘁𝗵𝗲 𝗶𝗺𝗮𝗴𝗲 ?`)
@@ -3926,14 +4001,18 @@ if (Owner && quotedMessage && textL.startsWith(prefix + "save") && m.quoted.chat
     
     if (quotedMessage.imageMessage) {
       let imageCaption = quotedMessage.imageMessage.caption;
-      let imageUrl = await client.downloadAndSaveMediaMessage(quotedMessage.imageMessage);
-      client.sendMessage(m.chat, { image: { url: imageUrl }, caption: imageCaption });
+      const imgStream = await downloadContentFromMessage(quotedMessage.imageMessage, 'image');
+      let imgBuf = Buffer.from([]);
+      for await (const chunk of imgStream) imgBuf = Buffer.concat([imgBuf, chunk]);
+      client.sendMessage(m.chat, { image: imgBuf, caption: imageCaption });
     }
 
     if (quotedMessage.videoMessage) {
       let videoCaption = quotedMessage.videoMessage.caption;
-      let videoUrl = await client.downloadAndSaveMediaMessage(quotedMessage.videoMessage);
-      client.sendMessage(m.chat, { video: { url: videoUrl }, caption: videoCaption });
+      const vidStream = await downloadContentFromMessage(quotedMessage.videoMessage, 'video');
+      let vidBuf = Buffer.from([]);
+      for await (const chunk of vidStream) vidBuf = Buffer.concat([vidBuf, chunk]);
+      client.sendMessage(m.chat, { video: vidBuf, caption: videoCaption });
     }
      }
       }
@@ -4049,7 +4128,7 @@ const cap = "ᴇᴅɪᴛᴇᴅ ʙʏ KING M";
 if (!m.quoted) return m.reply("Send the image then tag it with the command.");
 if (!/image/.test(mime)) return m.reply("That is not an image, try again while quoting an actual image.");             
 
-let fdr = await client.downloadAndSaveMediaMessage(m.quoted)
+let fdr = await _downloadAndSave(client, m.quoted)
 let fta = await uploadToCatbox(fdr)
                     m.reply("𝗔 𝗺𝗼𝗺𝗲𝗻𝘁, KING 𝗶𝘀 𝗲𝗿𝗮𝘀𝗶𝗻𝗴 𝘁𝗵𝗲 𝗯𝗮𝗰𝗸𝗴𝗿𝗼𝘂𝗻𝗱. . .");
 
@@ -4203,52 +4282,46 @@ const rel = await quote(xf, pushname, pppuser)
 
 //========================================================================================================================//                  
                       case "fullpp": {
-                      if(!Owner) throw NotOwner; 
-                      const { S_WHATSAPP_NET } = require('@whiskeysockets/baileys');
-                      try {
-const fs = require("fs");
-if(!msgR) { m.reply('𝗤𝘂𝗼𝘁𝗲 𝗮𝗻 𝗶𝗺𝗮𝗴𝗲...') ; return } ;
+    if (!Owner) throw NotOwner;
+    const { S_WHATSAPP_NET } = require('@whiskeysockets/baileys');
+    
+    try {
+        // Use the 'quoted' object created by your smsg function
+        if (!m.quoted || !/image/.test(m.quoted.mtype)) {
+            return m.reply('𝗛𝘂𝗵 𝘁𝗵𝗶𝘀 𝗶𝘀 𝗻𝗼𝘁 𝗮𝗻 𝗶𝗺𝗮𝗴𝗲... Quote an image!');
+        }
 
-let media;
-if (msgR.imageMessage) {
-     media = msgR.imageMessage
+        m.reply("Updating profile picture...");
 
-  } else {
-    m.reply('𝗛𝘂𝗵 𝘁𝗵𝗶𝘀 𝗶𝘀 𝗻𝗼𝘁 𝗮𝗻 𝗶𝗺𝗮𝗴𝗲...'); return
-  } ;
+        // Use the download helper defined in your smsg
+        let mediaBuffer = await m.quoted.download();
 
-var medis = await client.downloadAndSaveMediaMessage(media);
-         var {
-                        img
-                    } = await generateProfilePicture(medis)
+        var { img } = await generateProfilePicture(mediaBuffer);
 
-client.query({
-                tag: 'iq',
-                attrs: {
-                    target: undefined,
-                    to: S_WHATSAPP_NET,
-                    type:'set',
-                    xmlns: 'w:profile:picture'
-                },
-                content: [
-                    {
-                        tag: 'picture',
-                        attrs: { type: 'image' },
-                        content: img
-                    }
-                ]
-            })      
-                    fs.unlinkSync(medis)
-                    m.reply("𝗣𝗿𝗼𝗳𝗶𝗹𝗲 𝗽𝗶𝗰𝘁𝘂𝗿𝗲 𝘂𝗽𝗱𝗮𝘁𝗲𝗱 𝘀𝘂𝗰𝗰𝗲𝘀𝗳𝘂𝗹𝗹𝘆✅")
+        await client.query({
+            tag: 'iq',
+            attrs: {
+                to: S_WHATSAPP_NET,
+                type: 'set',
+                xmlns: 'w:profile:picture'
+            },
+            content: [
+                {
+                    tag: 'picture',
+                    attrs: { type: 'image' },
+                    content: img
+                }
+            ]
+        });
 
-} catch (error) {
+        m.reply("𝗣𝗿𝗼𝗳𝗶𝗹𝗲 𝗽𝗶𝗰𝘁𝘂𝗿𝗲 𝘂𝗽𝗱𝗮𝘁𝗲𝗱 𝘀𝘂𝗰𝗰𝗲𝘀𝗳𝘂𝗹𝗹𝘆✅");
 
-m.reply("An error occured while updating profile photo\n" + error)
-
+    } catch (error) {
+        console.error(error);
+        m.reply("An error occurred:\n" + error.message);
+    }
 }
-     }
-          break;
-
+break;
 //========================================================================================================================//                  
             case "upload": {
  const fs = require("fs");
@@ -4265,7 +4338,7 @@ let mediaBuffer = await q.download()
 let isTele = /image\/(png|jpe?g|gif)|video\/mp4/.test(mime)
 
 if (isTele) {
-    let fta2 = await client.downloadAndSaveMediaMessage(q)
+    let fta2 = await _downloadAndSave(client, q)
     let link = await uploadtoimgur(fta2)
 
     const fileSizeMB = (mediaBuffer.length / (1024 * 1024)).toFixed(2)
@@ -4292,7 +4365,7 @@ let mediaBuffer = await q.download()
 let isTele = /image\/(png|jpe?g|gif)|video\/mp4/.test(mime)
 
 if (isTele) {
-    let fta2 = await client.downloadAndSaveMediaMessage(q)
+    let fta2 = await _downloadAndSave(client, q)
     let link = await uploadToCatbox(fta2)
 
     const fileSizeMB = (mediaBuffer.length / (1024 * 1024)).toFixed(2)
@@ -4324,7 +4397,7 @@ if (isTele) {
            
                 atas = text.split('|')[0] ? text.split('|')[0] : '-'
                 bawah = text.split('|')[1] ? text.split('|')[1] : '-'
-                let dwnld = await client.downloadAndSaveMediaMessage(qmsg)
+                let dwnld = await _downloadAndSave(client, qmsg)
                 let fatGans = await uploadToCatbox(dwnld)
                 let smeme = `https://api.memegen.link/images/custom/${encodeURIComponent(bawah)}/${encodeURIComponent(atas)}.png?background=${fatGans}`
                 let pop = await client.sendImageAsSticker(m.chat, smeme, m, {
@@ -4500,7 +4573,7 @@ await client.sendMessage(m.chat, { text: `Quoted text is your token. To fetch me
        case "hacker2": {
        if (!/image/.test(mime)) return m.reply("Hello hacker 👋, quote an image, probably a clear image of yourself or a person.");  
 
-let fdr = await client.downloadAndSaveMediaMessage(qmsg);
+let fdr = await _downloadAndSave(client, qmsg);
 
 const fta = await uploadToCatbox(fdr);
 
@@ -4897,7 +4970,7 @@ case 'newspic': case 'channelpic': {
     if (!jid) return m.reply('❌ Usage: newspic <jid> — reply to an image');
     if (!m.quoted || !['imageMessage'].includes(m.quoted.mtype)) return m.reply('❌ Reply to an image with this command.');
     try {
-        const imgBuffer = await downloadMediaMessage(m.quoted, 'buffer', {});
+        const imgBuffer = await downloadMediaMessage(m.quoted.fakeObj || m.quoted, 'buffer', {});
         await client.newsletterUpdatePicture(jid, imgBuffer);
         m.reply(`✅ Channel picture updated!`);
     } catch (e) {
@@ -5312,49 +5385,72 @@ case 'fbdl': {
 break;
        
 //========================================================================================================================//                  
-      case "tiktok": case "tikdl":  {
-if (!text) {
-    return m.reply('Please provide a TikTok video link.');
-  }
-              
-if (!text.includes("tiktok.com")) {
-        return m.reply("That is not a TikTok link.");
-}
-await client.sendMessage(m.chat, {
-      react: { text: '✅️', key: m.key }
-    });
+      case "tiktok": case "tikdl": case "tt": {
+if (!text) return m.reply('Please provide a TikTok video link.\nExample: .tiktok https://vm.tiktok.com/xxx');
+if (!/tiktok\.com|vm\.tiktok\.com/.test(text)) return m.reply("That is not a valid TikTok link.");
 
- try {
-    const response = await axios.get(`https://api.bk9.dev/download/tiktok?url=${encodeURIComponent(text)}`);
+try {
+    await client.sendMessage(m.chat, { react: { text: '⏳', key: m.key } });
 
-    if (response.data.status && response.data.BK9) {
-      const videoUrl = response.data.BK9.BK9;
-      const description = response.data.BK9.desc;
-      const commentCount = response.data.BK9.comment_count;
-      const likesCount = response.data.BK9.likes_count;
-      const uid = response.data.BK9.uid;
-      const nickname = response.data.BK9.nickname;
-      const musicTitle = response.data.BK9.music_info.title;
+    let videoUrl = null, audioUrl = null, title = 'TikTok Video', author = '';
 
-      await client.sendMessage(m.chat, {
-        text: `Data fetched successfully✅ wait a moment. . .`,
-      }, { quoted: m });
+    const tikApis = [
+        async () => {
+            const d = await fetchJson(`https://api.siputzx.my.id/api/d/tiktok?url=${encodeURIComponent(text)}`);
+            if (d?.data?.video) { title = d.data.desc || title; author = d.data.author?.nickname || ''; return { video: d.data.video, audio: d.data.audio }; }
+            return null;
+        },
+        async () => {
+            const d = await fetchJson(`https://api.agatz.xyz/api/tiktok?url=${encodeURIComponent(text)}`);
+            const v = d?.data?.video_no_wm || d?.data?.video || d?.data?.play;
+            if (v) { title = d.data?.title || title; return { video: v }; }
+            return null;
+        },
+        async () => {
+            const d = await fetchJson(`https://api.dreaded.site/api/tiktok?url=${encodeURIComponent(text)}`);
+            const v = d?.result?.nowm || d?.result?.video || d?.result?.play;
+            if (v) { title = d.result?.title || title; return { video: v }; }
+            return null;
+        },
+        async () => {
+            const res = await axios.get(`https://api.bk9.dev/download/tiktok?url=${encodeURIComponent(text)}`);
+            if (res.data?.status && res.data?.BK9) {
+                const v = res.data.BK9.BK9;
+                title = res.data.BK9.desc || title;
+                author = res.data.BK9.nickname || '';
+                return { video: v };
+            }
+            return null;
+        }
+    ];
 
-      await client.sendMessage(m.chat, {
-        video: { url: videoUrl },
-        caption: "𝙳𝙾𝚆𝙽𝙻𝙾𝙰𝙳𝙴𝙳  𝙱𝚈 KING M",
-        gifPlayback: false
-      }, { quoted: m });
-
-    } else {
-      reply('Failed to retrieve video from the provided link.');
+    let dlResult = null;
+    for (const fn of tikApis) {
+        try { dlResult = await fn(); if (dlResult?.video) break; } catch (_) {}
     }
 
-  } catch (e) {
-    reply(`An error occurred during download: ${e.message}`);
-  }
+    if (!dlResult?.video) {
+        await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
+        return m.reply("❌ Failed to download TikTok video. Try again.");
+    }
+
+    videoUrl = dlResult.video;
+
+    await client.sendMessage(m.chat, {
+        video: { url: videoUrl },
+        caption: `🎵 *${title.slice(0, 200)}*${author ? `\n👤 *@${author}*` : ''}\n\n_Downloaded by KING-M_`,
+        gifPlayback: false
+    }, { quoted: m });
+
+    await client.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
+
+} catch (e) {
+    console.error('[TikTok]', e.message);
+    m.reply(`❌ TikTok download failed: ${e.message}`);
+    await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
 }
-  break;
+}
+break;
 
 //========================================================================================================================//
   case "pinterest": case "pin":
@@ -5946,8 +6042,8 @@ https://github.com/sesco001/KING-MD
     if (!quoted) throw `Send or tag an image with the caption ${prefix + command}`; 
     if (!/image/.test(mime)) throw `Send or tag an image with the caption ${prefix + command}`; 
     if (/webp/.test(mime)) throw `Send or tag an image with the caption ${prefix + command}`; 
-    let media = await client.downloadAndSaveMediaMessage(quoted); 
-    await client.updateProfilePicture(m.chat, { url: media }).catch((err) => fs.unlinkSync(media)); 
+    let mediaBuf = await downloadMediaMessage(quoted, 'buffer', {}); 
+    await client.updateProfilePicture(m.chat, mediaBuf);
     reply('Group icon updated Successfully✅️'); 
     } 
     break;
@@ -6007,7 +6103,7 @@ case "del": {
           case "leave": { 
                  if (!Owner) throw NotOwner;
                  if (!m.isGroup) throw group;
- await client.sendMessage(m.chat, { text : '𝗚𝗼𝗼𝗱𝗯𝘆𝗲 𝗲𝘃𝗲𝗿𝘆𝗼𝗻𝗲👋. 𝗣𝗘𝗔𝗖𝗘-𝗔𝗶 𝗶𝘀 𝗟𝗲𝗮𝘃𝗶𝗻𝗴 𝘁𝗵𝗲 𝗚𝗿𝗼𝘂𝗽 𝗻𝗼𝘄...' , mentions: participants.map(a => a.id)}, { quoted : m }); 
+ await client.sendMessage(m.chat, { text : '𝗚𝗼𝗼𝗱𝗯𝘆𝗲 𝗲𝘃𝗲𝗿𝘆𝗼𝗻𝗲👋. King-𝗔𝗶 𝗶𝘀 𝗟𝗲𝗮𝘃𝗶𝗻𝗴 𝘁𝗵𝗲 𝗚𝗿𝗼𝘂𝗽 𝗻𝗼𝘄...' , mentions: participants.map(a => a.id)}, { quoted : m }); 
                  await client.groupLeave(m.chat); 
   
              } 
@@ -6069,40 +6165,91 @@ client.sendMessage(
 
 //========================================================================================================================//                  
 case "whatsong": case "shazam": {
-          let acr = new acrcloud({
-            'host': "identify-eu-west-1.acrcloud.com",
-            'access_key': '2631ab98e77b49509e3edcf493757300',
-            'access_secret': "KKbVWlTNCL3JjxjrWnywMdvQGanyhKRN0fpQxyUo"
-          });
-          if (!m.quoted) {
-            throw "Tagg a short video or audio";
-          }
+    try {
+        if (!m.quoted) return m.reply("Please tag a short audio or video message to identify the song.");
 
-          let d = m.quoted ? m.quoted : m;
-          let mimes = (d.msg || d).mimetype || d.mediaType || '';
-          if (/video|audio/.test(mimes)) {
-            let buffer = await d.download();
-            await reply("Analyzing the media...");
-            let {
-              status,
-              metadata
-            } = await acr.identify(buffer);
-            if (status.code !== 0x0) {
-              throw status.msg;
-            }
-            let { title, artists, album, genres, release_date } = metadata.music[0x0];
-            let txt = "*• Title:* " + title + (artists ? "\n*• Artists:* " + artists.map(_0x4f5d59 => _0x4f5d59.name).join(", ") : '');
-            txt += '' + (album ? "\n*• Album:* " + album.name : '') + (genres ? "\n*• Genres:* " + genres.map(_0xf7bf2e => _0xf7bf2e.name).join(", ") : '') + "\n";
-            txt += "*• Release Date:* " + release_date;
-            await client.sendMessage(m.chat, {
-              'text': txt.trim()
-            }, {
-              'quoted': m
-            });
-          }
+        let d = m.quoted;
+        let mimes = (d.msg || d).mimetype || '';
+
+        if (!/video|audio/.test(mimes)) return m.reply("❌ This is not an audio or video file.");
+
+        await client.sendMessage(m.chat, { react: { text: '⏳', key: m.key } });
+        m.reply("🎵 Analyzing audio... Please wait.");
+
+        // Download the media
+        let mediaBuffer = await d.download();
+        let ext = mimes.includes('video') ? '.mp4' : '.mp3';
+        let tempFile = getRandom(ext);
+        fs.writeFileSync(tempFile, mediaBuffer);
+
+        // Upload to catbox (with pomf.cat as fallback)
+        let mediaUrl;
+        try {
+            mediaUrl = await uploadToCatbox(tempFile);
+        } catch (uploadErr) {
+            // Fallback: try pomf.cat
+            try {
+                const FormData = require('form-data');
+                const form = new FormData();
+                form.append('files[]', fs.createReadStream(tempFile));
+                const resp = await axios.post('https://pomf.cat/upload.php', form, { headers: form.getHeaders() });
+                mediaUrl = resp.data?.files?.[0]?.url;
+                if (mediaUrl && !mediaUrl.startsWith('http')) mediaUrl = 'https://pomf.cat' + mediaUrl;
+            } catch (_) {}
         }
-        break; 
-                      
+        if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
+
+        if (!mediaUrl) return m.reply("❌ Failed to upload the audio for analysis. Try again.");
+
+        // Try multiple Shazam APIs
+        let songResult = null;
+        const shazamApis = [
+            async () => {
+                const r = await fetchJson(`https://api.siputzx.my.id/api/tools/shazam?url=${encodeURIComponent(mediaUrl)}`);
+                if (!r?.data) return null;
+                const d = r.data;
+                return `🎵 *${d.title || d.track?.title || 'Unknown'}*\n👤 *Artist:* ${d.subtitle || d.track?.subtitle || 'Unknown'}\n🎶 *Genre:* ${d.genres?.primary || 'Unknown'}`;
+            },
+            async () => {
+                const r = await fetchJson(`https://api.agatz.xyz/api/shazam?url=${encodeURIComponent(mediaUrl)}`);
+                const d = r?.data || r?.result;
+                if (!d) return null;
+                if (typeof d === 'object' && d.title) return `🎵 *${d.title}*\n👤 *Artist:* ${d.artist || d.subtitle || 'Unknown'}\n🎶 *Genre:* ${d.genre || 'Unknown'}`;
+                return typeof d === 'string' ? d : null;
+            },
+            async () => {
+                const r = await fetchJson(`https://api.dreaded.site/api/shazam?url=${encodeURIComponent(mediaUrl)}`);
+                const d = r?.result || r?.data;
+                if (!d) return null;
+                if (typeof d === 'object' && d.title) return `🎵 *${d.title}*\n👤 *Artist:* ${d.artist || d.subtitle || 'Unknown'}`;
+                return typeof d === 'string' ? d : null;
+            },
+            async () => {
+                const r = await fetchJson(`https://apiskeith.top/ai/shazam?url=${encodeURIComponent(mediaUrl)}`);
+                const d = r?.result || r?.data;
+                if (!d) return null;
+                return typeof d === 'string' ? d : JSON.stringify(d);
+            }
+        ];
+
+        for (const apiFn of shazamApis) {
+            try { songResult = await apiFn(); if (songResult) break; } catch (_) {}
+        }
+
+        if (!songResult) {
+            await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
+            return m.reply("❌ Couldn't identify the song. Try a longer or clearer audio clip.");
+        }
+
+        await client.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
+        await m.reply(`🎵 *SONG IDENTIFIED* 🎵\n\n${songResult}`);
+
+    } catch (error) {
+        console.error('Shazam Error:', error);
+        m.reply("❌ An error occurred while identifying the song:\n" + error.message);
+    }
+}
+break;
 //========================================================================================================================//
 case "s": 
 case "sticker": {
@@ -6144,41 +6291,58 @@ case "sticker": {
 }
 break;
 //========================================================================================================================//                  
-           case "dp": {
-  let ha;
-  let qd;
-  let pp2;
-  
-  if (m.quoted) {
-    try { 
-      ha = m.quoted.sender;
-      qd = await client.getName(ha);
-      pp2 = await client.profilePictureUrl(ha, 'image');
-    } catch {  
-      pp2 = 'https://tinyurl.com/yx93l6da';
-    }
-  } else if (m.text.includes(' ')) {
-    const number = m.text.split(' ')[1].trim();
+        case "dp": {
+    let target;
+    let name;
+    let ppUrl;
+
     try {
-      ha = number.includes('@') ? number : `${number}@s.whatsapp.net`;
-      qd = await client.getName(ha);
-      pp2 = await client.profilePictureUrl(ha, 'image');
-    } catch {
-      pp2 = 'https://tinyurl.com/yx93l6da';
+        // 1. Identify the target (Quoted > Mentioned > Text Number)
+        if (m.quoted) {
+            target = m.quoted.sender;
+        } else if (m.mentionedJid && m.mentionedJid[0]) {
+            target = m.mentionedJid[0];
+        } else if (text) {
+            // Clean the input to get just numbers
+            let number = text.replace(/[^0-9]/g, '');
+            target = number + '@s.whatsapp.net';
+        } else {
+            return m.reply(`Tag a user or provide a number! Example: .dp @user`);
+        }
+
+        // 2. Get the Name
+        try {
+            name = await client.getName(target);
+        } catch {
+            name = target.split('@')[0];
+        }
+
+        // 3. Fetch the DP URL
+        try {
+            // 'image' returns the high-res version
+            ppUrl = await client.profilePictureUrl(target, 'image');
+        } catch (e) {
+            // If high-res fails, try the preview version
+            try {
+                ppUrl = await client.profilePictureUrl(target, 'preview');
+            } catch {
+                // Fallback to a default "No Profile Picture" image
+                ppUrl = 'https://cdn.pixabay.com/photo/2015/10/05/22/37/blank-profile-picture-973460_960_720.png';
+            }
+        }
+
+        // 4. Send the result
+        await client.sendMessage(m.chat, { 
+            image: { url: ppUrl }, 
+            caption: `*👤 Name:* ${name}\n*📱 Number:* ${target.split('@')[0]}`,
+        }, { quoted: m });
+
+    } catch (err) {
+        console.error(err);
+        m.reply("Failed to fetch the profile picture.");
     }
-  } else {
-    throw `Tag a user or provide a number after "dp"!`;
-  }
-  
-  const bar = `Profile Picture of ${qd}`;
-  await client.sendMessage(m.chat, { 
-    image: { url: pp2 }, 
-    caption: bar, 
-    fileLength: "999999999999"
-  }, { quoted: m });
 }
 break;
-
 //========================================================================================================================//                  
 case "list": case "vars": case "help":
 let vaa = `𝟏 Owner➣ 𝐆𝐞𝐭 𝗼𝘄𝗻𝗲𝗿  𝐜𝐨𝐧𝐭𝐚𝐜𝐭\n\n𝟐 𝐁𝐫𝐨𝐚𝐝𝐜𝐚𝐬𝐭➣ 𝐒𝐞𝐧𝐝𝐬 𝐦𝐞𝐬𝐬𝐚𝐠𝐞 𝐭𝐨 𝐚𝐥𝐥 𝐠𝐫𝐨𝐮𝐩𝐬\n\n𝟑 𝐉𝐨𝐢𝐧➣ 𝐭𝐚𝐠 𝐠𝐫𝐨𝐮𝐩 𝐥𝐢𝐧𝐤 𝐰𝐢𝐭𝐡 𝐣𝐨𝐢𝐧\n\n𝟒 𝐛𝐨𝐭𝐩𝐩➣ 𝐂𝐡𝐚𝐧𝐠𝐞 𝐛𝐨𝐭𝐬 𝐚𝐜𝐜𝐨𝐮𝐧𝐭 𝐝𝐩\n\n𝟓 𝐁𝐥𝐨𝐜𝐤➣ 𝐁𝐥𝐨𝐜𝐤 𝐭𝐡𝐞𝐦 𝐟𝐚𝐤𝐞 𝐟𝐫𝐢𝐞𝐧𝐝𝐬\n\n𝟔 𝐊𝐢𝐥𝐥➣ 𝐊𝐢𝐥𝐥𝐬 𝐠𝐫𝐨𝐮𝐩 𝐢𝐧 𝐬𝐞𝐜𝐨𝐧𝐝𝐬\n\n𝟕 𝐔𝐧𝐛𝐥𝐨𝐜𝐤➣ 𝐆𝐢𝐯𝐞 𝐭𝐡𝐞𝐦 𝐟𝐚𝐤𝐞 𝐟𝐫𝐢𝐞𝐧𝐝𝐬 𝐚 𝐬𝐞𝐜𝐨𝐧𝐝 𝐜𝐡𝐚𝐧𝐜𝐞\n\n𝟖 𝐒𝐞𝐭𝐯𝐚𝐫➣ 𝐒𝐞𝐭 𝐯𝐚𝐫𝐬 𝐢𝐧 𝐡𝐞𝐫𝐨𝐤𝐮\n\n𝟗 𝐒𝐭𝐢𝐜𝐤𝐞𝐫➣ 𝐂𝐨𝐧𝐯𝐞𝐫𝐭𝐬 𝐚 𝐩𝐡𝐨𝐭𝐨 𝐨𝐫 𝐚 𝐬𝐡𝐨𝐫𝐭 𝐯𝐢𝐝𝐞𝐨 𝐭𝐨 𝐚 𝐬𝐭𝐢𝐜𝐤𝐞𝐫\n\n𝟏𝟎 𝐓𝐨𝐢𝐦𝐠➣ 𝐂𝐨𝐧𝐯𝐞𝐫𝐭𝐬 𝐚 𝐬𝐭𝐢𝐜𝐤𝐞𝐫 𝐭𝐨 𝐚 𝐩𝐡𝐨𝐭𝐨\n\n𝟏𝟏 𝐏𝐥𝐚𝐲➣ 𝐆𝐞𝐭 𝐲𝐨𝐮𝐫 𝐟𝐚𝐯𝐨𝐫𝐢𝐭𝐞 𝐬𝐨𝐧𝐠\n\n𝟏𝟐 𝐖𝐡𝐚𝐭𝐬𝐨𝐧𝐠➣ 𝐠𝐞𝐭 𝐭𝐡𝐞 𝐭𝐢𝐭𝐥𝐞 𝐨𝐟 𝐭𝐡𝐞 𝐬𝐨𝐧𝐠\n\n𝟏𝟑 𝐘𝐭𝐬 ➣ 𝐆𝐞𝐭 𝐘𝐨𝐮𝐓𝐮𝐛𝐞 𝐯𝐢𝐝𝐞𝐨𝐬\n\n𝟏𝟒 𝐌𝐨𝐯𝐢𝐞➣ 𝐆𝐞𝐭 𝐲𝐨𝐮𝐫 𝐟𝐚𝐯𝐨𝐫𝐢𝐭𝐞 𝐦𝐨𝐯𝐢𝐞 𝐝𝐞𝐭𝐚𝐢𝐥𝐬\n\n𝟏𝟓 𝐌𝐢𝐱➣ 𝐂𝐨𝐦𝐛𝐢𝐧𝐞𝐬 +𝟐𝐞𝐦𝐨𝐣𝐢𝐬\n\n𝟏𝟔 𝐀𝐢-𝐢𝐦𝐠➣ 𝐆𝐞𝐭 𝐚𝐧 𝐀𝐢 𝐩𝐡𝐨𝐭𝐨\n\n𝟏𝟕 𝐆𝐩𝐭 ➣ 𝐇𝐞𝐫𝐞 𝐭𝐨 𝐚𝐧𝐬𝐰𝐞𝐫 𝐲𝐨𝐮𝐫 𝐪𝐮𝐞𝐬𝐭𝐢𝐨𝐧𝐬\n\n𝟏𝟖 𝐃𝐩➣ 𝐆𝐞𝐭𝐬 𝐚 𝐩𝐞𝐫𝐬𝐨𝐧 𝐝𝐩\n\n𝟏𝟗 𝐒𝐩𝐞𝐞𝐝 ➣ 𝐂𝐡𝐞𝐜𝐤𝐬 𝐛𝐨𝐭𝐬 𝐬𝐩𝐞𝐞𝐝\n\n𝟐𝟎 𝐀𝐥𝐢𝐯𝐞➣ 𝐂𝐡𝐞𝐜𝐤 𝐰𝐡𝐞𝐭𝐡𝐞𝐫 𝐭𝐡𝐞 𝐛𝐨𝐭 𝐢𝐬 𝐬𝐭𝐢𝐥𝐥 𝐤𝐢𝐜𝐤𝐢𝐧𝐠\n\n𝟐𝟏 𝐑𝐮𝐧𝐭𝐢𝐦𝐞➣ 𝐖𝐡𝐞𝐧 𝐝𝐢𝐝 𝐛𝐨𝐭 𝐬𝐭𝐚𝐫𝐭𝐞𝐝 𝐨𝐩𝐞𝐫𝐚𝐭𝐢𝐧𝐠\n\n𝟐𝟐 𝐒𝐜𝐫𝐢𝐩𝐭➣ 𝐆𝐞𝐭 𝐛𝐨𝐭 𝐬𝐜𝐫𝐢𝐩𝐭\n\n𝟐𝟑 𝐎𝐰𝐧𝐞𝐫  ➣ 𝐆𝐞𝐭 𝐨𝐰𝐧𝐞𝐫(𝐬) 𝐜𝐨𝐧𝐭𝐚𝐜𝐭\n\n𝟐𝟒 𝐕𝐚𝐫𝐬 ➣ 𝐒𝐞𝐞 𝐚𝐥𝐥 𝐯𝐚𝐫𝐢𝐚𝐛𝐥𝐞𝐬\n\n𝟐𝟓 𝐏𝐫𝐨𝐦𝐨𝐭𝐞➣ 𝐆𝐢𝐯𝐞𝐬 𝐨𝐧𝐞 𝐚𝐝𝐦𝐢𝐧 𝐫𝐨𝐥𝐞\n\n𝟐𝟔 𝐃𝐞𝐦𝐨𝐭𝐞➣ 𝐃𝐞𝐦𝐨𝐭𝐞𝐬 𝐟𝐫𝐨𝐦 𝐠𝐫𝐨𝐮𝐩 𝐚𝐝𝐦𝐢𝐧 𝐭𝐨 𝐚 𝐦𝐞𝐦𝐛𝐞𝐫\n\n𝟐𝟕 𝐃𝐞𝐥𝐞𝐭𝐞➣ 𝐃𝐞𝐥𝐞𝐭𝐞 𝐚 𝐦𝐞𝐬𝐬𝐚𝐠𝐞\n\n𝟐𝟖 𝐑𝐞𝐦𝐨𝐯𝐞/𝐤𝐢𝐜𝐤➣ 𝐊𝐢𝐜𝐤 𝐭𝐡𝐚𝐭 𝐭𝐞𝐫𝐫𝐨𝐫𝐢𝐬𝐭 𝐟𝐫𝐨𝐦 𝐚 𝐠𝐫𝐨𝐮𝐩\n\n𝟐𝟗 𝐅𝐨𝐫𝐞𝐢𝐠𝐧𝐞𝐫𝐬➣ 𝐆𝐞𝐭 𝐟𝐨𝐫𝐞𝐢𝐠𝐧 𝐧𝐮𝐦𝐛𝐞𝐫𝐬\n\n𝟑𝟎 𝐂𝐥𝐨𝐬𝐞➣ 𝐓𝐢𝐦𝐞 𝐟𝐨𝐫 𝐠𝐫𝐨𝐮𝐩 𝐦𝐞𝐦𝐛𝐞𝐫𝐬 𝐭𝐨 𝐭𝐚𝐤𝐞 𝐚 𝐛𝐫𝐞𝐚𝐤 𝐨𝐧𝐥𝐲 𝐚𝐝𝐦𝐢𝐧𝐬 𝐜𝐚𝐧 𝐜𝐡𝐚𝐭\n\n𝟑𝟏 𝐎𝐩𝐞𝐧 ➣ 𝐄𝐯𝐞𝐫𝐲𝐨𝐧𝐞 𝐜𝐚𝐧 𝐜𝐡𝐚𝐭 𝐢𝐧 𝐚 𝐠𝐫𝐨𝐮𝐩\n\n𝟑𝟐 𝐈𝐜𝐨𝐧➣ 𝐂𝐡𝐚𝐧𝐠𝐞 𝐠𝐫𝐨𝐮𝐩 𝐢𝐜𝐨𝐧\n\n𝟑𝟑 𝐒𝐮𝐛𝐣𝐞𝐜𝐭➣ 𝐂𝐡𝐚𝐧𝐠𝐞 𝐠𝐫𝐨𝐮𝐩 𝐬𝐮𝐛𝐣𝐞𝐜𝐭\n\n𝟑𝟒 𝐃𝐞𝐬𝐜➣ 𝐆𝐞𝐭 𝐠𝐫𝐨𝐮𝐩 𝐝𝐞𝐬𝐜𝐫𝐢𝐩𝐭𝐢𝐨𝐧\n\n𝟑𝟓 𝐋𝐞𝐚𝐯𝐞➣ 𝐓𝐡𝐞 𝐠𝐫𝐨𝐮𝐩 𝐢𝐬 𝐛𝐨𝐫𝐢𝐧𝐠 ,𝐭𝐢𝐦𝐞 𝐟𝐨𝐫 𝐛𝐨𝐭 𝐭𝐨 𝐥𝐞𝐚𝐯𝐞\n\n𝟑𝟔 𝐓𝐚𝐠𝐚𝐥𝐥 ➣ 𝐓𝐚𝐠 𝐞𝐯𝐞𝐫𝐲𝐨𝐧𝐞 𝐢𝐧 𝐚 𝐠𝐫𝐨𝐮𝐩 𝐜𝐡𝐚𝐭\n\n𝟑𝟕 𝐇𝐢𝐝𝐞𝐭𝐚𝐠➣ 𝐀𝐭𝐭𝐞𝐧𝐭𝐢𝐨𝐧! 𝐀𝐭𝐭𝐞𝐧𝐭𝐢𝐨𝐧! 𝐬𝐨𝐦𝐞𝐨𝐧𝐞 𝐡𝐚𝐬 𝐬𝐨𝐦𝐞𝐭𝐡𝐢𝐧𝐠 𝐭𝐨 𝐬𝐚𝐲\n\n𝟑𝟖 𝐑𝐞𝐯𝐨𝐤𝐞 ➣ 𝐑𝐞𝐬𝐞𝐭 𝐠𝐫𝐨𝐮𝐩 𝐥𝐢𝐧𝐤`
@@ -6193,29 +6357,37 @@ case "retrieve": {
     try {
         await client.sendMessage(m.chat, { react: { text: '⏳', key: m.key } });
 
-        // peacefunc strips the outer wrapper, so m.quoted.mtype tells us exactly what we have:
-        // - 'viewOnceMessageV2' / 'viewOnceMessageV2Extension' → inner media is in m.quoted.message
-        // - 'imageMessage' / 'videoMessage' → m.quoted IS the media data directly
         const mtype = m.quoted.mtype || '';
-        let mediaData, isImg;
+        let buffer, isImg, captionText = '';
 
         if (mtype === 'viewOnceMessageV2' || mtype === 'viewOnceMessageV2Extension') {
             const inner = m.quoted.message || {};
-            if (inner.imageMessage) { mediaData = inner.imageMessage; isImg = true; }
-            else if (inner.videoMessage) { mediaData = inner.videoMessage; isImg = false; }
+            if (inner.imageMessage) {
+                isImg = true;
+                captionText = inner.imageMessage.caption || '';
+                const stream = await downloadContentFromMessage(inner.imageMessage, 'image');
+                buffer = Buffer.from([]);
+                for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
+            } else if (inner.videoMessage) {
+                isImg = false;
+                captionText = inner.videoMessage.caption || '';
+                const stream = await downloadContentFromMessage(inner.videoMessage, 'video');
+                buffer = Buffer.from([]);
+                for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
+            }
         } else if (mtype === 'imageMessage') {
-            mediaData = m.quoted; isImg = true;
+            isImg = true;
+            captionText = m.quoted.caption || '';
+            buffer = await m.quoted.download();
         } else if (mtype === 'videoMessage') {
-            mediaData = m.quoted; isImg = false;
+            isImg = false;
+            captionText = m.quoted.caption || '';
+            buffer = await m.quoted.download();
         }
 
-        if (!mediaData) return reply("❌ No media found. Please quote a View-Once image or video.");
+        if (!buffer || !buffer.length) return reply("❌ No media found. Please quote a View-Once image or video.");
 
-        const stream2 = await downloadContentFromMessage(mediaData, isImg ? 'image' : 'video');
-        let buffer = Buffer.from([]);
-        for await (const chunk of stream2) { buffer = Buffer.concat([buffer, chunk]); }
-
-        const caption = `✨ *KING M RETRIEVER* ✨\n\n_Caption:_ ${mediaData.caption || "None"}`;
+        const caption = `✨ *KING M RETRIEVER* ✨\n\n_Caption:_ ${captionText || "None"}`;
         await client.sendMessage(m.chat, { [isImg ? 'image' : 'video']: buffer, caption }, { quoted: m });
         await client.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
 
@@ -6227,51 +6399,59 @@ case "retrieve": {
 break;
 //========================================================================================================================//
 //========================================================================================================================//                  
-         case "alaa": case "wiih": case "waah": case "ehee": case "vv2": case "mmmh": {
+case "alaa": case "wiih": case "waah": case "ehee": case "vv2": case "mmmh": {
+    if (!m.quoted) return reply("⚠️ Quote a *View Once* image or video.");
     try {
-        if (!m.quoted) return m.reply("Please reply to a media message.");
+        await client.sendMessage(m.chat, { react: { text: '⏳', key: m.key } });
 
-        // peacefunc strips the outer wrapper — m.quoted IS the media content for direct types,
-        // and m.quoted.message holds the inner content for view-once / ephemeral types.
         const mtype = m.quoted.mtype || '';
-        const directMap = {
-            imageMessage: 'image', videoMessage: 'video',
-            audioMessage: 'audio', stickerMessage: 'sticker', documentMessage: 'document'
-        };
+        let buffer, isImg, captionText = '';
 
-        let media, mediaKind;
-
-        if (directMap[mtype]) {
-            // m.quoted IS the media content directly
-            media = m.quoted;
-            mediaKind = directMap[mtype];
-        } else if (mtype.includes('viewOnce') || mtype === 'ephemeralMessage') {
-            // inner media is nested in m.quoted.message
+        if (mtype === 'viewOnceMessageV2' || mtype === 'viewOnceMessageV2Extension') {
             const inner = m.quoted.message || {};
-            const innerType = Object.keys(inner).find(k => directMap[k]);
-            if (innerType) { media = inner[innerType]; mediaKind = directMap[innerType]; }
+            if (inner.imageMessage) {
+                isImg = true;
+                captionText = inner.imageMessage.caption || '';
+                const stream = await downloadContentFromMessage(inner.imageMessage, 'image');
+                buffer = Buffer.from([]);
+                for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
+            } else if (inner.videoMessage) {
+                isImg = false;
+                captionText = inner.videoMessage.caption || '';
+                const stream = await downloadContentFromMessage(inner.videoMessage, 'video');
+                buffer = Buffer.from([]);
+                for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
+            }
+        } else if (mtype === 'imageMessage') {
+            isImg = true;
+            captionText = m.quoted.caption || '';
+            buffer = await m.quoted.download();
+        } else if (mtype === 'videoMessage') {
+            isImg = false;
+            captionText = m.quoted.caption || '';
+            buffer = await m.quoted.download();
         }
 
-        if (!media || !mediaKind) return m.reply("❌ Unsupported or non-media message. Reply to an image, video, audio, or sticker.");
+        if (!buffer || !buffer.length) return reply("❌ No media found.");
 
-        const stream = await downloadContentFromMessage(media, mediaKind);
-        let buffer = Buffer.from([]);
-        for await (const chunk of stream) { buffer = Buffer.concat([buffer, chunk]); }
+        const caption = `✨ *KING M VV2 BYPASS* ✨\n\n👤 *From:* @${m.sender.split('@')[0]}\n📝 *Caption:* ${captionText || "None"}`;
 
-        const botId = client.decodeJid(client.user.id);
-        await client.sendMessage(botId, {
-            [mediaKind]: buffer,
-            caption: `✨ *KING M DM Send* ✨\nFrom: @${m.sender.split('@')[0]}`,
+        const ownerJid = client.user.id.split(":")[0] + "@s.whatsapp.net";
+        await client.sendMessage(ownerJid, {
+            [isImg ? 'image' : 'video']: buffer,
+            caption,
             mentions: [m.sender]
         });
-        m.reply("✅ Sent to your DM.");
-    } catch (err) {
-        logError('VV2', err);
-        m.reply("❌ Failed to send to DM.");
+
+        await client.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
+        reply("_Bypass sent to owner DM!_");
+
+    } catch (error) {
+        logError('VV2', error);
+        reply("❌ Failed to bypass. Media may have expired.");
     }
 }
 break;
-
 //========================================================================================================================//                  
    case 'take': {
     const { Sticker, StickerTypes } = require('wa-sticker-formatter');
@@ -6334,136 +6514,178 @@ case 'ytsearch':
 
 //========================================================================================================================//                  
 case "ytmp3": case "yta": {
-const ytSearch = require("yt-search");
-const fetch = require('node-fetch');
-try {
+    if (!text) return m.reply("𝗣𝗿𝗼𝘃𝗶𝗱𝗲 𝗮 𝘃𝗮𝗹𝗶𝗱 𝗬𝗼𝘂𝘁𝘂𝗯𝗲 𝗹𝗶𝗻𝗸 𝗼𝗿 𝘀𝗼𝗻𝗴 𝗻𝗮𝗺𝗲!");
 
-if (!text) return m.reply("𝗣𝗿𝗼𝘃𝗶𝗱𝗲 𝗮 𝘃𝗮𝗹𝗶𝗱 𝗬𝗼𝘂𝘁𝘂𝗯𝗲 𝗹𝗶𝗻𝗸!")
+    try {
+        await client.sendMessage(m.chat, { react: { text: '⏳', key: m.key } });
 
-        let urls = text.match(/(?:https?:\/\/)?(?:youtu\.be\/|(?:www\.|m\.)?youtube\.com\/(?:watch\?v=|v\/|embed\/|shorts\/|playlist\?list=)?)([a-zA-Z0-9_-]{11})/gi);
-        if (!urls) return m.reply('𝗧𝗵𝗶𝘀 𝗶𝘀 𝗻𝗼𝘁 𝗮 𝗬𝗼𝘂𝘁𝘂𝗯𝗲 𝗟𝗶𝗻𝗸');
-        let urlIndex = parseInt(text) - 1;
-        if (urlIndex < 0 || urlIndex >= urls.length)
-                return m.reply('𝗜𝗻𝘃𝗮𝗹𝗶𝗱 𝗟𝗶𝗻𝗸.');
-
-        let search = await yts(text);
-    let link = search.all[0].url;
-
-    const apis = [
-      `https://apiskeith.vercel.app/download/ytmp3?url=${link}`,
-      `https://apis.davidcyriltech.my.id/youtube/mp3?url=${link}`,
-      `https://api.ryzendesu.vip/api/downloader/ytmp3?url=${link}`,
-      `https://api.dreaded.site/api/ytdl/audio?url=${link}`
-       ];
-
-    for (const api of apis) {
-      try {
-        let data = await fetchJson(api);
-
-        // Checking if the API response is successful
-        if (data.status === 200 || data.success) {
-          let videoUrl = data.result?.downloadUrl || data.url;
-          let outputFileName = `${search.all[0].title.replace(/[^a-zA-Z0-9 ]/g, "")}.mp3`;
-          let outputPath = path.join(__dirname, outputFileName);
-
-          const response = await axios({
-            url: videoUrl,
-            method: "GET",
-            responseType: "stream"
-          });
-
-          if (response.status !== 200) {
-            m.reply("sorry but the API endpoint didn't respond correctly. Try again later.");
-            continue;
-          }
-                ffmpeg(response.data)
-            .toFormat("mp3")
-            .save(outputPath)
-            .on("end", async () => {
-              await client.sendMessage(
-                m.chat,
-                {
-                  document: { url: outputPath },
-                  mimetype: "audio/mp3",
-                  caption: "𝙳𝙾𝚆𝙽𝙻𝙾𝙰𝙳𝙴𝙳  𝙱𝚈 KING M",
-                  fileName: outputFileName,
-                },
-                { quoted: m }
-              );
-              fs.unlinkSync(outputPath);
-            })
-            .on("error", (err) => {
-              m.reply("Download failed\n" + err.message);
-            });
-
-          return;
+        // 1. Resolve to a YouTube URL
+        let link, title, thumbnail = '';
+        if (/https?:\/\/(www\.)?youtu/.test(text)) {
+            link = text;
+            try {
+                const vid = text.match(/(?:v=|youtu\.be\/)([^&?#]+)/)?.[1];
+                if (vid) { const s = await yts({ videoId: vid }); title = s?.title || 'Unknown'; thumbnail = s?.thumbnail || ''; }
+                else title = 'Unknown';
+            } catch { title = 'Unknown'; }
+        } else {
+            const search = await yts(text);
+            if (!search.all.length) return m.reply("❌ No results found.");
+            link = search.all[0].url; title = search.all[0].title; thumbnail = search.all[0].thumbnail || '';
         }
-      } catch (e) {
-        // Continue to the next API if one fails
-        continue;
-      }
-   }
-    m.reply("An error occurred. All APIs might be down or unable to process the request.");
-  } catch (error) {
-    m.reply("Download failed\n" + error.message);
-  }
- }
-  break;
 
+        // 2. Try multiple download APIs (vreden is proven to work)
+        let downloadUrl = null;
+        const mp3Apis = [
+            async () => {
+                const d = await fetchJson(`https://api.vreden.my.id/api/v1/download/youtube/audio?url=${encodeURIComponent(link)}&quality=128`);
+                const u = d?.result?.download?.url || d?.data?.download?.url || d?.data?.url || d?.result?.url || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+            async () => {
+                const d = await fetchJson(`https://api.agatz.xyz/api/ytmp3?url=${encodeURIComponent(link)}`);
+                const u = d?.data?.url || d?.result?.url || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+            async () => {
+                const d = await fetchJson(`https://api.siputzx.my.id/api/d/ytmp3?url=${encodeURIComponent(link)}`);
+                const u = d?.data?.url || d?.result?.url || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+            async () => {
+                const d = await fetchJson(`https://api.dreaded.site/api/ytdl/audio?url=${encodeURIComponent(link)}`);
+                const u = d?.result?.url || d?.data?.url || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+            async () => {
+                const d = await fetchJson(`https://api.ryzendesu.vip/api/downloader/ytmp3?url=${encodeURIComponent(link)}`);
+                const u = d?.data?.url || d?.result?.url || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            }
+        ];
+
+        for (const fn of mp3Apis) {
+            try { downloadUrl = await fn(); if (downloadUrl) break; } catch (_) {}
+        }
+
+        if (!downloadUrl) {
+            await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
+            return m.reply("❌ All download APIs failed. Try again later.");
+        }
+
+        await client.sendMessage(m.chat, {
+            audio: { url: downloadUrl },
+            mimetype: "audio/mpeg",
+            fileName: `${title}.mp3`,
+            contextInfo: thumbnail ? {
+                externalAdReply: {
+                    title: title,
+                    body: "KING-M MUSIC",
+                    thumbnailUrl: thumbnail,
+                    sourceUrl: link,
+                    mediaType: 1,
+                    renderLargerThumbnail: true
+                }
+            } : undefined
+        }, { quoted: m });
+
+        await client.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
+
+    } catch (error) {
+        console.error('[ytmp3]', error.message);
+        m.reply("❌ Download failed. Please try again.");
+        await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
+    }
+}
+break;
 //========================================================================================================================//                  
 case 'ytmp4':
 case "ytv": {
-        try {
+    if (!text) return m.reply("𝗣𝗿𝗼𝘃𝗶𝗱𝗲 𝗮 𝘃𝗮𝗹𝗶𝗱 𝗬𝗼𝘂𝗧𝘂𝗯𝗲 𝗹𝗶𝗻𝗸 𝗼𝗿 𝘃𝗶𝗱𝗲𝗼 𝗻𝗮𝗺𝗲!");
 
-if (!text) return m.reply("𝗣𝗿𝗼𝘃𝗶𝗱𝗲 𝗮 𝘃𝗮𝗹𝗶𝗱 𝗬𝗼𝘂𝗧𝘂𝗯𝗲 𝗹𝗶𝗻𝗸!")
+    try {
+        await client.sendMessage(m.chat, { react: { text: '⏳', key: m.key } });
 
-        let urls = text.match(/(?:https?:\/\/)?(?:youtu\.be\/|(?:www\.|m\.)?youtube\.com\/(?:watch\?v=|v\/|embed\/|shorts\/|playlist\?list=)?)([a-zA-Z0-9_-]{11})/gi);
-        if (!urls) return m.reply('𝗧𝗵𝗶𝘀 𝗶𝘀 𝗻𝗼𝘁 𝗮 𝗬𝗼𝘂𝗧𝘂𝗯𝗲 𝗹𝗶𝗻𝗸');
-        let urlIndex = parseInt(text) - 1;
-        if (urlIndex < 0 || urlIndex >= urls.length)
-                return m.reply('𝗜𝗻𝘃𝗮𝗹𝗶𝗱 𝗹𝗶𝗻𝗸.');
+        // 1. Resolve URL
+        let link, title, thumbnail = '';
+        if (/https?:\/\/(www\.)?youtu/.test(text)) {
+            link = text;
+            try {
+                const vid = text.match(/(?:v=|youtu\.be\/)([^&?#]+)/)?.[1];
+                if (vid) { const s = await yts({ videoId: vid }); title = s?.title || 'Video'; thumbnail = s?.thumbnail || ''; }
+                else title = 'Video';
+            } catch { title = 'Video'; }
+        } else {
+            const search = await yts(text);
+            if (!search.all.length) return m.reply("❌ No results found.");
+            link = search.all[0].url; title = search.all[0].title; thumbnail = search.all[0].thumbnail || '';
+        }
 
-        let search = await yts(text);
-    if (!search.all.length) {
-      return reply(client, m, "No results found for your query.");
+        // 2. Try multiple video download APIs (vreden proven first)
+        let downloadUrl = null;
+        const mp4Apis = [
+            async () => {
+                const d = await fetchJson(`https://api.vreden.my.id/api/v1/download/youtube/video?url=${encodeURIComponent(link)}&quality=720`);
+                const u = d?.result?.download?.url || d?.data?.download?.url || d?.data?.url || d?.result?.url || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+            async () => {
+                const d = await fetchJson(`https://api.agatz.xyz/api/ytmp4?url=${encodeURIComponent(link)}`);
+                const u = d?.data?.url || d?.result?.url || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+            async () => {
+                const d = await fetchJson(`https://api.siputzx.my.id/api/d/ytmp4?url=${encodeURIComponent(link)}`);
+                const u = d?.data?.url || d?.result?.url || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+            async () => {
+                const d = await fetchJson(`https://api.dreaded.site/api/ytdl/video?url=${encodeURIComponent(link)}`);
+                const u = d?.result?.url || d?.data?.url || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+            async () => {
+                const d = await fetchJson(`https://api.ryzendesu.vip/api/downloader/ytmp4?url=${encodeURIComponent(link)}`);
+                const u = d?.data?.url || d?.result?.url || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            }
+        ];
+
+        for (const fn of mp4Apis) {
+            try { downloadUrl = await fn(); if (downloadUrl) break; } catch (_) {}
+        }
+
+        if (!downloadUrl) {
+            await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
+            return m.reply("❌ All download APIs failed. Try again later.");
+        }
+
+        await client.sendMessage(m.chat, {
+            video: { url: downloadUrl },
+            mimetype: "video/mp4",
+            caption: `✨ *KING-M YTMP4* ✨\n\n*Title:* ${title}\n*Link:* ${link}`,
+            fileName: `${title}.mp4`,
+            contextInfo: thumbnail ? {
+                externalAdReply: {
+                    title: title,
+                    body: "KING-M VIDEO",
+                    thumbnailUrl: thumbnail,
+                    sourceUrl: link,
+                    mediaType: 1,
+                    renderLargerThumbnail: true
+                }
+            } : undefined
+        }, { quoted: m });
+
+        await client.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
+
+    } catch (error) {
+        console.error('[ytmp4]', error.message);
+        m.reply(`❌ Download failed. Please try again.`);
+        await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
     }
-    let link = search.all[0].url; 
-
-    const apiUrl = `https://apiskeith.vercel.app/download/dlmp3?url=${link}`;
-
-    let response = await fetch(apiUrl);
-    let data = await response.json();
-
-    if (data.status && data.result) {
-      const videoData = {
-        title: data.result.title,
-        downloadUrl: data.result.downloadUrl,
-        thumbnail: search.all[0].thumbnail,
-        format: data.result.format,
-        quality: data.result.quality,
-      };
-
-      await client.sendMessage(
-        m.chat,
-        {
-          video: { url: videoData.downloadUrl },
-          mimetype: "video/mp4",
-          caption: "𝙳𝙾𝚆𝙽𝙻𝙾𝙰𝙳𝙴𝙳  𝙱𝚈 𝙿𝙴𝙰𝙲𝙴 𝙷𝚄𝙱",
-        },
-        { quoted: m }
-      );
-
-      return;
-    } else {
-      
-      return reply("Unable to fetch the video. Please try again later.");
-    }
-  } catch (error) {
- 
-    return reply(`An error occurred: ${error.message}`);
-  }
-};
-  break;
+}
+break;
 
 //========================================================================================================================//                  
    case "ping":
@@ -6580,67 +6802,95 @@ if (!text) return m.reply("No emojis provided ? ")
           break;
 
 //========================================================================================================================//                  
-          case "lyrics": {
-                      const fetch = require('node-fetch');
- const apiUrl = `https://api.dreaded.site/api/lyrics?title=${encodeURIComponent(text)}`;
+         case "lyrics": {
+    if (!text) return m.reply(`𝗣𝗿𝗼𝘃𝗶𝗱𝗲 𝗮 𝘀𝗼𝗻𝗴 𝗻𝗮𝗺𝗲!\n*Example:* ${prefix + command} Blinding Lights`);
 
     try {
-        if (!text) return m.reply("Provide a song name!");
+        await client.sendMessage(m.chat, { react: { text: '🎶', key: m.key } });
 
-        const data = await fetchJson(apiUrl);
+        // 1. Search for lyrics using LRCLIB (Very stable and free)
+        const data = await exports.fetchJson(`https://lrclib.net/api/search?q=${encodeURIComponent(text)}`);
 
-        if (!data.success || !data.result || !data.result.lyrics) {
-            return m.reply(`Sorry, I couldn't find any lyrics for "${text}".`);
+        if (!data || data.length === 0) {
+            return m.reply(`❌ No lyrics found for *"${text}"*. Try adding the artist name.`);
         }
 
-        const { title, artist, link, thumb, lyrics } = data.result;
+        const track = data[0];
+        let lyrics = track.plainLyrics;
 
-        const imageUrl = thumb || "https://i.imgur.com/Cgte666.jpeg";
-
-        const imageBuffer = await fetch(imageUrl)
-            .then(res => res.buffer())
-            .catch(err => {
-                console.error('Error fetching image:', err);
-                return null;
-            });
-
-        if (!imageBuffer) {
-            return m.reply("An error occurred while fetching the image.");
+        // If plain lyrics are missing, try cleaning the synced lyrics
+        if (!lyrics && track.syncedLyrics) {
+            lyrics = track.syncedLyrics.replace(/\[\d+:\d+\.\d+\]/g, '').trim();
         }
 
-        const caption = `**Title**: ${title}\n**Artist**: ${artist}\n\n${lyrics}`;
+        if (track.instrumental || !lyrics) {
+            return m.reply(`🎶 *${track.trackName}* - *${track.artistName}*\n\nThis track is marked as *Instrumental* (no lyrics).`);
+        }
+
+        // 2. Prepare the formatted response
+        let caption = `🎶 *LYRICS FINDER* 🎶\n\n`;
+        caption += `🔹 *Title:* ${track.trackName}\n`;
+        caption += `🔹 *Artist:* ${track.artistName}\n`;
+        caption += `🔹 *Album:* ${track.albumName || 'N/A'}\n\n`;
+        caption += `────────────────────\n\n`;
+        caption += lyrics;
+
+        // 3. Send with a thumbnail (using a default music icon)
+        const imageUrl = "https://i.imgur.com/Cgte666.jpeg"; 
 
         await client.sendMessage(
             m.chat,
             {
-                image: imageBuffer,
-                caption: caption
+                image: { url: imageUrl },
+                caption: caption.trim()
             },
             { quoted: m }
         );
+
+        await client.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
+
     } catch (error) {
-        console.error(error);
-        m.reply(`An error occurred while fetching the lyrics for "${text}".`);
+        console.error('Lyrics Error:', error);
+        m.reply(`❌ An error occurred while fetching the lyrics for "${text}".`);
     }
-      }
-        break;
+}
+break;
 
 //========================================================================================================================//                  
-        case "toimg": case "photo": { 
-    if (!quoted) throw 'Tag a static video with the command!'; 
-    if (!/webp/.test(mime)) throw `Tag a sticker with ${prefix + command}`; 
-  
-    let media = await client.downloadAndSaveMediaMessage(quoted); 
-    let mokaya = await getRandom('.png'); 
-    exec(`ffmpeg -i ${media} ${mokaya}`, (err) => { 
-   fs.unlinkSync(media); 
-   if (err) throw err 
-   let buffer = fs.readFileSync(mokaya); 
-   client.sendMessage(m.chat, { image: buffer, caption: `ᴄᴏɴᴠᴇʀᴛᴇᴅ ʙʏ ᴘᴇᴀᴄᴇ ʜᴜʙ`}, { quoted: m }) 
-   fs.unlinkSync(mokaya); 
-    }); 
-    } 
-     break;
+   case "toimg": case "photo": { 
+    // 1. Check if a sticker is quoted
+    if (!m.quoted) return m.reply('Tag a sticker with the command!');
+    if (!/webp/.test(m.quoted.mtype)) return m.reply(`Tag a sticker with ${prefix + command}`);
+
+    try {
+        await client.sendMessage(m.chat, { react: { text: '⏳', key: m.key } });
+
+        // 2. Download the sticker using your smsg helper
+        let buffer = await m.quoted.download();
+
+        // 3. Convert WebP to PNG using Jimp (standard in your project)
+        const Jimp = require('jimp');
+        const image = await Jimp.read(buffer);
+        const pngBuffer = await image.getBufferAsync(Jimp.MIME_PNG);
+
+        // 4. Send the result
+        await client.sendMessage(
+            m.chat, 
+            { 
+                image: pngBuffer, 
+                caption: `ᴄᴏɴᴠᴇʀᴛᴇᴅ ʙʏ King M`
+            }, 
+            { quoted: m }
+        );
+
+        await client.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
+
+    } catch (error) {
+        console.error("ToImg Error:", error);
+        m.reply("❌ Failed to convert sticker to image. Make sure it's a static sticker.");
+    }
+}
+break;
 
 //========================================================================================================================//                  
    case "movie": 
@@ -6691,10 +6941,9 @@ if (!text) return m.reply("No emojis provided ? ")
     if (!quoted) throw `Tag an image you want to be the bot's profile picture with ${prefix + command}`; 
     if (!/image/.test(mime)) throw `Tag an image you want to be the bot's profile picture with ${prefix + command}`; 
     if (/webp/.test(mime)) throw `Tag an image you want to be the bot's profile picture with ${prefix + command}`; 
-    let media = await client.downloadAndSaveMediaMessage(quoted);
-                
-                    await client.updateProfilePicture(botNumber, { url: media }).catch((err) => fs.unlinkSync(media)); 
-    reply `Bot's profile picture has been successfully updated✅️`; 
+    let mediaBuf2 = await downloadMediaMessage(quoted, 'buffer', {});
+    await client.updateProfilePicture(botNumber, mediaBuf2);
+    reply('Bot\'s profile picture has been successfully updated✅️'); 
           }
     break;
 
@@ -6702,43 +6951,67 @@ if (!text) return m.reply("No emojis provided ? ")
           case 'broadcast': { 
          if (!Owner) throw NotOwner; 
          if (!text) { 
-             reply("Provide a message to cats!") 
+             reply("Provide a message to broadcast!") 
              return; 
-         } 
-         let getGroups = await client.groupFetchAllParticipating() 
-         let groups = Object.entries(getGroups) 
-             .slice(0) 
-             .map(entry => entry[1]) 
-         let res = groups.map(v => v.id) 
-         reply(` Broadcasting in ${res.length} Group Chat, in ${res.length * 1.5} seconds`) 
-         for (let i of res) { 
-             let txt = `MAKA 𝗕𝗥𝗢𝗔𝗗𝗖𝗔𝗦𝗧\n\n🀄 Message: ${text}\n\nAuthor: ${pushname}` 
-             await client.sendMessage(i, { 
-                 image: { 
-                     url: menulink
-                 }, 
-                 caption: `${txt}` 
-             }) 
-         } 
-         reply(`Broadcasted to ${res.length} Groups.`) 
+         }
+         // Broadcast to all DM (private) contacts from the store
+         try {
+             const allChats = Object.keys(store?.chats?.all?.() ? store.chats.all() : {});
+             const dmChats = allChats.filter(jid => jid.endsWith('@s.whatsapp.net') && jid !== client.user.id.split(':')[0] + '@s.whatsapp.net');
+             if (dmChats.length === 0) return reply("No DM contacts found in store yet. Send or receive at least one DM first.");
+             reply(`📡 Broadcasting to *${dmChats.length}* DMs...`);
+             let sent = 0;
+             const txt = `📢 *𝗕𝗥𝗢𝗔𝗗𝗖𝗔𝗦𝗧*\n\n${text}\n\n_— ${pushname}_`;
+             for (let jid of dmChats) {
+                 try {
+                     await client.sendMessage(jid, { text: txt });
+                     sent++;
+                     await sleep(1500);
+                 } catch (_) {}
+             }
+             reply(`✅ Broadcast sent to *${sent}/${dmChats.length}* DMs.`);
+         } catch (err) {
+             logError('BROADCAST', err);
+             reply("❌ Broadcast failed.");
+         }
      } 
  break;
 
 //========================================================================================================================//                  
  case "gemini": {
     try {
-        if (!text) return m.reply("This is Peace, an AI using Gemini APIs to process text, provide yr query");
-    
-        const { default: Gemini } = await import('gemini-ai');
+        if (!text) return m.reply("🤖 *Gemini AI*\n\nSend a question or prompt.\nExample: `.gemini what is quantum physics?`");
 
-        const gemini = new Gemini("AIzaSyDJUtskTG-MvQdlT4tNE319zBqLMFei8nQ");
-        const chat = gemini.createChat();
+        await client.sendPresenceUpdate('composing', m.chat);
 
-        const res = await chat.ask(text);
+        let result = null;
+        const aiApis = [
+            async () => {
+                const r = await fetchJson(`https://apiskeith.top/keithai?q=${encodeURIComponent(text)}`);
+                return r?.result || r?.data || null;
+            },
+            async () => {
+                const r = await fetchJson(`https://api.siputzx.my.id/api/ai/gpt3?text=${encodeURIComponent(text)}`);
+                return r?.data || r?.result || null;
+            },
+            async () => {
+                const r = await fetchJson(`https://api.botcahx.eu.org/api/ai/gpt4?text=${encodeURIComponent(text)}`);
+                return r?.result || r?.data || null;
+            },
+            async () => {
+                const r = await fetchJson(`https://api.agatz.xyz/api/ai?message=${encodeURIComponent(text)}`);
+                return r?.data || r?.result || null;
+            }
+        ];
 
-        await m.reply(res);
+        for (const fn of aiApis) {
+            try { result = await fn(); if (result && typeof result === 'string' && result.trim()) break; else result = null; } catch (_) {}
+        }
+
+        if (!result) return m.reply("❌ All AI APIs are currently unavailable. Try again later.");
+        await m.reply(result.trim());
     } catch (e) {
-        m.reply("I am unable to generate responses\n\n" + e);
+        m.reply("❌ Error: " + e.message);
     }
  }
  break;
@@ -6888,7 +7161,7 @@ break;
 //========================================================================================================================//                  
 
 //========================================================================================================================//                  
-              case 'gcprofile': {
+              case 'gcprofile': case "gcdp": {
  function convertTimestamp(timestamp) {
   const d = new Date(timestamp * 1000);
   const daysOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -6919,17 +7192,51 @@ await client.sendMessage(m.chat, { image: { url: pp },
          break;
 
 //========================================================================================================================//                  
-   case 'tovideo': case 'mp4': case 'tovid': {
-                        
-                if (!quoted) return reply('Reply to Sticker')
-                if (!/webp/.test(mime)) return reply(`reply sticker with caption *${prefix + command}*`)
-                
-        let media = await client.downloadAndSaveMediaMessage(quoted)
-                let webpToMp4 = await webp2mp4File(media)
-                await client.sendMessage(m.chat, { video: { url: webpToMp4.result, caption: 'Convert Webp To Video' } }, { quoted: m })
-                await fs.unlinkSync(media)
-            }
-            break;
+ case 'tovideo': case 'mp4': case 'tovid': {
+    // 1. Check if an animated sticker is quoted
+    if (!m.quoted) return m.reply('Reply to an animated sticker');
+    if (!/webp/.test(m.quoted.mtype)) return m.reply(`Reply to a sticker with *${prefix + command}*`);
+
+    try {
+        await client.sendMessage(m.chat, { react: { text: '⏳', key: m.key } });
+
+        // 2. Download the sticker using your smsg helper
+        let buffer = await m.quoted.download();
+
+        // 3. Save buffer to a temporary file for the converter
+        let tempFile = getRandom('.webp');
+        fs.writeFileSync(tempFile, buffer);
+
+        // 4. Convert WebP to MP4
+        // Note: Ensure 'webp2mp4File' is imported or defined in your project
+        let webpToMp4 = await webp2mp4File(tempFile);
+
+        if (!webpToMp4 || !webpToMp4.result) {
+            fs.unlinkSync(tempFile);
+            return m.reply("❌ Failed to convert sticker to video. The converter might be down.");
+        }
+
+        // 5. Send the video result
+        await client.sendMessage(
+            m.chat, 
+            { 
+                video: { url: webpToMp4.result }, 
+                caption: '✨ *Converted Webp To Video* ✨' 
+            }, 
+            { quoted: m }
+        );
+
+        // 6. Cleanup and Success Reaction
+        fs.unlinkSync(tempFile);
+        await client.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
+
+    } catch (error) {
+        console.error("ToVideo Error:", error);
+        m.reply("❌ An error occurred during conversion.");
+        await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
+    }
+}
+break;
 //========================================================================================================================//
 case "addsudo":
   if (!isOwner) return reply("Only bot owner can add sudo owners.");
@@ -6965,28 +7272,492 @@ case "listsudo":
     reply(text);
   }
   break;
-//========================================================================================================================//        
-        default: {
-          if (cmd && budy.toLowerCase() != undefined) {
-            if (m.chat.endsWith("broadcast")) return;
-            if (m.isBaileys) return;
-            if (!budy.toLowerCase()) return;
-            logError(`${prefix}${command}`);
-          }
-        }
-      }
+//========================================================================================================================//
+// ================== LIST ADMINS ==================
+case "listadmin": case "adminlist": {
+    if (!m.isGroup) return reply("This command is only for groups.");
+    try {
+        const admins = groupAdmin;
+        if (!admins || admins.length === 0) return reply("No admins found.");
+        let txt = `👑 *GROUP ADMINS* 👑\n\n`;
+        admins.forEach((jid, i) => {
+            txt += `${i + 1}. @${jid.split('@')[0]}\n`;
+        });
+        await client.sendMessage(m.chat, { text: txt, mentions: admins }, { quoted: m });
+    } catch (error) {
+        logError('LISTADMIN', error);
+        reply("❌ Failed to fetch admin list.");
     }
+}
+break;
+//========================================================================================================================//
+// ================== TAG ADMINS ==================
+case "tagadmin": case "admintag": {
+    if (!m.isGroup) return reply("This command is only for groups.");
+    if (!isAdmin && !Owner) return reply("Only admins can use this command.");
+    try {
+        const admins = groupAdmin;
+        if (!admins || admins.length === 0) return reply("No admins found.");
+        const msg = text || "Admins are needed here!";
+        let txt = `📢 *ADMIN ALERT* 📢\n\n_${msg}_\n\n`;
+        admins.forEach((jid) => { txt += `@${jid.split('@')[0]} `; });
+        await client.sendMessage(m.chat, { text: txt, mentions: admins }, { quoted: m });
+    } catch (error) {
+        logError('TAGADMIN', error);
+        reply("❌ Failed to tag admins.");
+    }
+}
+break;
+//========================================================================================================================//
+// ================== OCR - READ TEXT FROM IMAGE ==================
+case "ocr": case "readtext": case "totext": {
+    try {
+        let q = m.quoted ? m.quoted : m;
+        let mime = (q.msg || q).mimetype || '';
+        if (!/image/.test(mime)) return reply("Please reply to an image.");
+        reply("🔍 Reading text from image...");
+
+        const buff = await q.download();
+        const tempImg = getRandom('.jpg');
+        fs.writeFileSync(tempImg, buff);
+        const imgUrl = await uploadToCatbox(tempImg);
+        fs.unlinkSync(tempImg);
+
+        let ocrResult = null;
+        const ocrApis = [
+            async () => {
+                const r = await fetchJson(`https://api.siputzx.my.id/api/tools/ocr?url=${encodeURIComponent(imgUrl)}`);
+                return r?.data || r?.result || null;
+            },
+            async () => {
+                const r = await fetchJson(`https://api.botcahx.eu.org/api/tools/ocr?url=${encodeURIComponent(imgUrl)}`);
+                return r?.result || r?.data || null;
+            }
+        ];
+        for (const fn of ocrApis) {
+            try { ocrResult = await fn(); if (ocrResult) break; } catch (_) {}
+        }
+
+        if (!ocrResult) return reply("❌ No text found in the image or API unavailable.");
+        reply(`📝 *Text Extracted:*\n\n${ocrResult}`);
+    } catch (error) {
+        logError('OCR', error);
+        reply("❌ Failed to extract text from image.");
+    }
+}
+break;
+//========================================================================================================================//
+// ================== ALIVE2 - STYLISH BOT STATUS ==================
+case "alive2": case "status2": {
+    try {
+        const uptime = runtime(process.uptime());
+        const now = DateTime.now().setZone('Africa/Nairobi');
+        const timeStr = now.toFormat('HH:mm:ss');
+        const dateStr = now.toFormat('dd/MM/yyyy');
+        const txt = `
+╔══════════════════╗
+║   🤖 *${botname}* 🤖    
+╠══════════════════╣
+║ 📅 Date: *${dateStr}*
+║ 🕐 Time: *${timeStr}*
+║ ⏱️ Uptime: *${uptime}*
+║ 👤 Owner: *${author}*
+║ 🌐 Status: *Online ✅*
+╚══════════════════╝
+`.trim();
+        await client.sendMessage(m.chat, {
+            image: { url: 'https://i.ibb.co/ykNttdF/king.jpg' },
+            caption: txt
+        }, { quoted: m });
+    } catch (error) {
+        logError('ALIVE2', error);
+        reply("Bot is alive! ✅");
+    }
+}
+break;
+//========================================================================================================================//
+case 'spotify': case 'spdt': case 'spdl': {
+    if (!text) return m.reply(`🎵 Provide a Spotify track link or song name!\nExample: *${prefix}spotify Shape of You*`);
+    try {
+        await client.sendMessage(m.chat, { react: { text: '⏳', key: m.key } });
+        let songName = text, songUrl = null, songTitle = null, songArtist = null, songCover = null;
+
+        // If it's a Spotify URL — extract track name via API, else use as search query
+        if (/spotify\.com\/track/.test(text)) {
+            const trackId = text.match(/track\/([a-zA-Z0-9]+)/)?.[1];
+            if (trackId) {
+                const meta = await fetchJson(`https://api.siputzx.my.id/api/m/spotify?id=${trackId}`).catch(() => null);
+                songName = meta?.data?.name || text;
+                songTitle = meta?.data?.name;
+                songArtist = meta?.data?.artists?.map(a => a.name)?.join(', ');
+                songCover = meta?.data?.album?.images?.[0]?.url;
+            }
+        }
+
+        // Try multiple Spotify download APIs
+        const spApis = [
+            async () => {
+                const d = await fetchJson(`https://api.siputzx.my.id/api/d/spotify?q=${encodeURIComponent(songName)}`);
+                if (d?.data?.url) { songTitle = songTitle || d.data.name; songArtist = songArtist || d.data.artist; songCover = songCover || d.data.image; return d.data.url; }
+                return null;
+            },
+            async () => {
+                const d = await fetchJson(`https://api.agatz.xyz/api/spotify?q=${encodeURIComponent(songName)}`);
+                if (d?.data?.url) { songTitle = songTitle || d.data.title; songArtist = songArtist || d.data.artist; return d.data.url; }
+                return null;
+            },
+            async () => {
+                const d = await fetchJson(`https://api.dreaded.site/api/spotify?q=${encodeURIComponent(songName)}`);
+                const u = d?.result?.url || d?.data?.url;
+                if (u) { songTitle = songTitle || d?.result?.title || d?.data?.title; return u; }
+                return null;
+            },
+            async () => {
+                const d = await fetchJson(`https://api.ryzendesu.vip/api/downloader/spotify?url=${encodeURIComponent(text.includes('spotify.com') ? text : '')}&q=${encodeURIComponent(songName)}`);
+                const u = d?.data?.url || d?.result?.url;
+                return (u && u.startsWith('http')) ? u : null;
+            }
+        ];
+
+        for (const fn of spApis) {
+            try { songUrl = await fn(); if (songUrl) break; } catch (_) {}
+        }
+
+        if (!songUrl) {
+            await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
+            return m.reply("❌ Could not download the Spotify track. Try again or use a different song.");
+        }
+
+        const caption = `🎵 *${songTitle || songName}*\n${songArtist ? `👤 *Artist:* ${songArtist}` : ''}\n\n_Downloaded by KING-M_`;
+        const msgPayload = { audio: { url: songUrl }, mimetype: 'audio/mpeg', fileName: `${songTitle || songName}.mp3` };
+        if (songCover) {
+            msgPayload.contextInfo = { externalAdReply: { title: songTitle || songName, body: songArtist || 'Spotify', thumbnailUrl: songCover, mediaType: 1, renderLargerThumbnail: true } };
+        }
+        await client.sendMessage(m.chat, msgPayload, { quoted: m });
+        await client.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
+    } catch (e) {
+        console.error('[Spotify]', e.message);
+        m.reply("❌ Spotify download failed. Try again.");
+        await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
+    }
+}
+break;
+
+//========================================================================================================================//
+case 'truth': {
+    const truths = [
+        "What's the most embarrassing thing you've ever done in public?",
+        "Have you ever lied to get out of trouble? What was the lie?",
+        "What's the biggest secret you've kept from your parents?",
+        "Have you ever had a crush on someone in this group?",
+        "What's something you did that you never told anyone about?",
+        "What's the most childish thing you still do?",
+        "Who is your celebrity crush?",
+        "Have you ever cheated on a test or exam?",
+        "What's the most ridiculous thing you've cried about?",
+        "What's your biggest fear that you never told anyone?",
+        "Have you ever faked being sick to avoid something?",
+        "What's the weirdest dream you've ever had?",
+        "If you could switch lives with someone in this chat, who would it be?",
+        "What's the pettiest reason you've ever blocked someone?",
+        "Have you ever accidentally sent a text to the wrong person?",
+        "What's something you pretend to like but actually hate?",
+        "What's the longest you've gone without showering?",
+        "Have you ever had a huge argument over something silly?",
+        "What's your most used emoji and what does it say about you?",
+        "What's one thing you regret doing in the last year?"
+    ];
+    const chosen = truths[Math.floor(Math.random() * truths.length)];
+    await client.sendMessage(m.chat, {
+        text: `🔮 *TRUTH*\n\n_${chosen}_\n\n_Use ${prefix}dare for a challenge!_`,
+    }, { quoted: m });
+}
+break;
+
+//========================================================================================================================//
+case 'dare': {
+    const dares = [
+        "Send a voice message singing the chorus of your favorite song.",
+        "Change your status to 'I eat boogers' for the next 10 minutes.",
+        "Text someone in your contacts 'I love you' and screenshot the response.",
+        "Send the most unflattering photo of yourself.",
+        "Do 20 pushups right now and send a video proof.",
+        "Call the last person you texted and sing happy birthday to them.",
+        "Send a message to your crush using only emojis.",
+        "Let someone in this group change your WhatsApp status for 1 hour.",
+        "Record a 15-second video of yourself dancing and send it here.",
+        "Tell everyone your honest first impression of them in 1 word each.",
+        "Say the alphabet backwards without making a mistake. Voice note only.",
+        "Send a message to the group with your eyes closed.",
+        "Put an ice cube in your shirt and keep it there for 30 seconds.",
+        "Speak like a robot for the next 5 minutes.",
+        "Send your most recent photo in your camera roll right now.",
+        "Write a 3-line love poem and dedicate it to someone in this group.",
+        "Act like a cat for the next 3 minutes and only respond in 'meow'.",
+        "Do your best impression of someone famous and voice note it.",
+        "Draw a portrait of someone in the group in Paint and send it.",
+        "Share the last YouTube video you watched."
+    ];
+    const chosen = dares[Math.floor(Math.random() * dares.length)];
+    await client.sendMessage(m.chat, {
+        text: `🎭 *DARE*\n\n_${chosen}_\n\n_Use ${prefix}truth for a question!_`,
+    }, { quoted: m });
+}
+break;
+
+//========================================================================================================================//
+case 'wyr': case 'wouldyourather': {
+    const wyrs = [
+        "🔴 Would you rather...\n\n*A)* Never use WhatsApp again\n*B)* Never use any other social media again",
+        "🔴 Would you rather...\n\n*A)* Be famous but poor\n*B)* Be rich but completely unknown",
+        "🔴 Would you rather...\n\n*A)* Know when you're going to die\n*B)* Know how you're going to die",
+        "🔴 Would you rather...\n\n*A)* Live without music\n*B)* Live without TV/movies",
+        "🔴 Would you rather...\n\n*A)* Be able to fly\n*B)* Be invisible whenever you want",
+        "🔴 Would you rather...\n\n*A)* Eat only pizza for a year\n*B)* Eat only rice for a year",
+        "🔴 Would you rather...\n\n*A)* Never feel hot\n*B)* Never feel cold",
+        "🔴 Would you rather...\n\n*A)* Always speak your mind\n*B)* Always know what others are thinking",
+        "🔴 Would you rather...\n\n*A)* Be 10 years older\n*B)* Be 10 years younger",
+        "🔴 Would you rather...\n\n*A)* Have unlimited money but no friends\n*B)* Have unlimited friends but no money",
+        "🔴 Would you rather...\n\n*A)* Fight 100 duck-sized horses\n*B)* Fight 1 horse-sized duck",
+        "🔴 Would you rather...\n\n*A)* Speak every language in the world\n*B)* Play every musical instrument perfectly",
+        "🔴 Would you rather...\n\n*A)* Never have to sleep\n*B)* Never have to eat",
+        "🔴 Would you rather...\n\n*A)* Live in a place that's always hot\n*B)* Live in a place that's always raining",
+        "🔴 Would you rather...\n\n*A)* Be the funniest person in the room\n*B)* Be the smartest person in the room"
+    ];
+    const chosen = wyrs[Math.floor(Math.random() * wyrs.length)];
+    await client.sendMessage(m.chat, {
+        text: `${chosen}\n\n_Reply with A or B!_`,
+    }, { quoted: m });
+}
+break;
+
+//========================================================================================================================//
+case '8ball': case 'eightball': case 'magic8': {
+    if (!text) return m.reply(`🎱 Ask me a yes/no question!\nExample: *${prefix}8ball Will I be rich?*`);
+    const responses = [
+        "✅ It is certain.", "✅ Without a doubt.", "✅ Yes, definitely!",
+        "✅ You may rely on it.", "✅ As I see it, yes.", "✅ Most likely.",
+        "✅ Outlook good.", "✅ Signs point to yes.", "⚖️ Ask again later.",
+        "⚖️ Better not tell you now.", "⚖️ Cannot predict now.",
+        "⚖️ Concentrate and ask again.", "❌ Don't count on it.",
+        "❌ My reply is no.", "❌ My sources say no.",
+        "❌ Outlook not so good.", "❌ Very doubtful.", "❌ Absolutely not!"
+    ];
+    const answer = responses[Math.floor(Math.random() * responses.length)];
+    await client.sendMessage(m.chat, {
+        text: `🎱 *MAGIC 8-BALL*\n\n❓ *Question:* ${text}\n\n💬 *Answer:* ${answer}`,
+    }, { quoted: m });
+}
+break;
+
+//========================================================================================================================//
+case 'apk': case 'apkdl': {
+    if (!text) return m.reply(`📱 Provide an app name!\nExample: *${prefix}apk WhatsApp*`);
+    try {
+        await client.sendMessage(m.chat, { react: { text: '🔍', key: m.key } });
+        let result = null;
+        const apkApis = [
+            async () => {
+                const d = await fetchJson(`https://api.siputzx.my.id/api/d/apkpure?q=${encodeURIComponent(text)}`);
+                if (d?.data) return d.data;
+                return null;
+            },
+            async () => {
+                const d = await fetchJson(`https://api.agatz.xyz/api/apk?q=${encodeURIComponent(text)}`);
+                if (d?.data) return d.data;
+                return null;
+            },
+            async () => {
+                const d = await fetchJson(`https://api.dreaded.site/api/apk?q=${encodeURIComponent(text)}`);
+                if (d?.result) return d.result;
+                return null;
+            }
+        ];
+
+        for (const fn of apkApis) {
+            try { result = await fn(); if (result) break; } catch (_) {}
+        }
+
+        if (!result) {
+            await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
+            return m.reply("❌ APK not found. Try a different app name.");
+        }
+
+        const name = result.name || result.title || text;
+        const version = result.version || 'Unknown';
+        const size = result.size || 'Unknown';
+        const developer = result.developer || result.dev || 'Unknown';
+        const downloadLink = result.url || result.download || result.link;
+        const icon = result.icon || result.image || result.cover;
+
+        const caption = `📱 *${name}*\n\n*Version:* ${version}\n*Size:* ${size}\n*Developer:* ${developer}\n*Download:* ${downloadLink || 'See below'}`;
+
+        if (icon) {
+            await client.sendMessage(m.chat, { image: { url: icon }, caption }, { quoted: m });
+        } else {
+            await m.reply(caption);
+        }
+
+        if (downloadLink) {
+            await client.sendMessage(m.chat, {
+                document: { url: downloadLink },
+                mimetype: 'application/vnd.android.package-archive',
+                fileName: `${name}_${version}.apk`
+            }, { quoted: m });
+        }
+
+        await client.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
+    } catch (e) {
+        console.error('[APK]', e.message);
+        m.reply("❌ Failed to fetch APK. Try again later.");
+        await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
+    }
+}
+break;
+
+//========================================================================================================================//
+case 'country': case 'countryinfo': {
+    if (!text) return m.reply(`🌍 Provide a country name!\nExample: *${prefix}country Kenya*`);
+    try {
+        const d = await fetchJson(`https://restcountries.com/v3.1/name/${encodeURIComponent(text)}`);
+        if (!d || d.status === 404) return m.reply("❌ Country not found.");
+        const c = Array.isArray(d) ? d[0] : d;
+        const info = `🌍 *${c.name.common}* (${c.name.official})\n\n` +
+            `🏙️ *Capital:* ${c.capital?.[0] || 'N/A'}\n` +
+            `🌐 *Region:* ${c.region} › ${c.subregion || ''}\n` +
+            `👥 *Population:* ${c.population?.toLocaleString() || 'N/A'}\n` +
+            `💰 *Currency:* ${Object.values(c.currencies || {})?.[0]?.name || 'N/A'} (${Object.values(c.currencies || {})?.[0]?.symbol || ''})\n` +
+            `🗣️ *Languages:* ${Object.values(c.languages || {}).join(', ') || 'N/A'}\n` +
+            `📞 *Calling Code:* +${c.idd?.root?.replace('+', '') || ''}${c.idd?.suffixes?.[0] || ''}\n` +
+            `🕐 *Timezone:* ${c.timezones?.[0] || 'N/A'}\n` +
+            `🚗 *Driving Side:* ${c.car?.side || 'N/A'}\n` +
+            `🌐 *TLD:* ${c.tld?.[0] || 'N/A'}`;
+        await client.sendMessage(m.chat, {
+            image: { url: c.flags?.png || c.flags?.svg || '' },
+            caption: info
+        }, { quoted: m });
+    } catch (e) {
+        m.reply("❌ Failed to fetch country info. Try again.");
+    }
+}
+break;
+
+//========================================================================================================================//
+case 'currency': case 'convert': {
+    if (!text) return m.reply(`💱 Convert currencies!\nExample: *${prefix}currency 100 USD KES*`);
+    try {
+        const parts = text.split(' ');
+        if (parts.length < 3) return m.reply(`Format: *${prefix}currency <amount> <FROM> <TO>*\nExample: *${prefix}currency 100 USD KES*`);
+        const amount = parseFloat(parts[0]);
+        const from = parts[1].toUpperCase();
+        const to = parts[2].toUpperCase();
+        if (isNaN(amount)) return m.reply("❌ Invalid amount.");
+        const d = await fetchJson(`https://api.frankfurter.app/latest?amount=${amount}&from=${from}&to=${to}`);
+        if (!d?.rates?.[to]) return m.reply(`❌ Could not convert ${from} to ${to}. Check the currency codes.`);
+        const result = d.rates[to];
+        m.reply(`💱 *Currency Converter*\n\n*${amount} ${from}* = *${result.toFixed(4)} ${to}*\n\n_Rate: 1 ${from} = ${(result/amount).toFixed(6)} ${to}_`);
+    } catch (e) {
+        m.reply("❌ Currency conversion failed. Check your input and try again.");
+    }
+}
+break;
+
+//========================================================================================================================//
+case 'autoreact': {
+    if (!Owner) throw NotOwner;
+    const { getSettings: _gs2 } = require('../Database/config');
+    const _s2 = await _gs2();
+    const cur = _s2.autoreact || 'off';
+    const validModes = ['off', 'dm', 'group', 'all'];
+    if (!text) return reply(
+        `⚡ *Auto React Status:* *${cur.toUpperCase()}*\n\n` +
+        `Usage: ${prefix}autoreact [dm/group/all/off]\n` +
+        `• *dm* — react in private chats\n` +
+        `• *group* — react in groups\n` +
+        `• *all* — react everywhere\n` +
+        `• *off* — disabled`
+    );
+    if (!validModes.includes(text)) return reply(`❌ Invalid mode. Use: dm / group / all / off`);
+    if (text === cur) return reply(`✅ Autoreact is already set to *${text.toUpperCase()}*`);
+    await updateSetting('autoreact', text);
+    reply(`✅ Autoreact set to *${text.toUpperCase()}*`);
+}
+break;
+
+//========================================================================================================================//
+case 'getpp':
+case 'pp':
+case 'pfp': {
+    try {
+        let target;
+        if (m.quoted) {
+            target = m.quoted.sender;
+        } else if (m.mentionedJid && m.mentionedJid.length > 0) {
+            target = m.mentionedJid[0];
+        } else if (text) {
+            target = text.replace(/[^0-9]/g, '') + '@s.whatsapp.net';
+        } else {
+            target = m.sender;
+        }
+
+        await client.sendMessage(m.chat, { react: { text: '⏳', key: m.key } });
+
+        let ppUrl;
+        try {
+            ppUrl = await client.profilePictureUrl(target, 'image');
+        } catch (e) {
+            ppUrl = null;
+        }
+
+        const targetNum = target.split('@')[0];
+        const displayName = m.quoted?.pushName || pushname;
+
+        if (!ppUrl) {
+            // Send default avatar with info
+            await client.sendMessage(m.chat, {
+                image: { url: 'https://i.imgur.com/3PWHSQN.png' },
+                caption: `📸 *Profile Picture*\n\n👤 *Number:* +${targetNum}\n\n_No profile picture set or privacy locked._`
+            }, { quoted: m });
+        } else {
+            await client.sendMessage(m.chat, {
+                image: { url: ppUrl },
+                caption: `📸 *Profile Picture*\n\n👤 *Number:* +${targetNum}\n🔗 _Tap & hold → Save to download_`
+            }, { quoted: m });
+        }
+
+        await client.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
+
+    } catch (err) {
+        logError('GETPP', err);
+        reply(`❌ Failed to fetch profile picture: ${err.message}`);
+    }
+}
+break;
+
+//========================================================================================================================//        
+ default: {
+            // FIX: Use safe navigation to check budy and command
+            const safeBudy = (budy || "").toLowerCase();
+            if (cmd && safeBudy !== "") {
+                if (m.chat.endsWith("broadcast")) return;
+                if (m.isBaileys) return;
+                logError(`${prefix}${command}`);
+            }
+        }
+      } // end switch
+    } // end if (cmd)
   } catch (err) {
-    // Only reply with errors if the sender is the owner/sudo — prevents spamming groups
-    // when other bots trigger our commands and get permission errors back
-    if (Owner || !m.isGroup) {
+    // FIX: Define a local check for the catch block since 'Owner' might be lost
+    const botNumber = client.user.id.split(':')[0] + '@s.whatsapp.net';
+    const isBotOwner = owner.map((v) => v.replace(/[^0-9]/g, "") + "@s.whatsapp.net").includes(m.sender) || m.sender === botNumber;
+
+    if (isBotOwner || !m.isGroup) {
       m.reply(util.format(err));
     } else {
       console.log(chalk.red('[ERR]'), util.format(err));
     }
   }
 };
-
 let file = require.resolve(__filename);
 fs.watchFile(file, () => {
   fs.unwatchFile(file);

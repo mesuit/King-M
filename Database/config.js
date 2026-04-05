@@ -20,10 +20,10 @@ const defaultSettings = {
   antitag: 'on',
   antibot: 'off',
   anticall: 'off',
-  antistatusmention: 'off', 
+  antistatus: 'off', 
   antiforeign: 'off',
   badword: 'off',
-  gptdm: 'off',
+  chatbot: 'off',
   welcomegoodbye: 'off',
   autoread: 'off',
   mode: 'public',
@@ -37,7 +37,8 @@ const defaultSettings = {
   antigroupmention: 'off',
   autolike_emojis: 'default',
   antimention: 'off',
-  antiforward: 'off'
+  antiforward: 'off',
+  autoreact: 'off'
 };
 
 // ================= MODE DETECTION =================
