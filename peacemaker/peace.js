@@ -79,6 +79,101 @@ const { menu, menulink, appname, herokuapi, botname, author, packname, mycode, a
 
 const { smsg, runtime, fetchUrl, isUrl, processTime, formatp, tanggal, formatDate, getTime,  sleep, generateProfilePicture, clockString, fetchJson, getBuffer, jsonformat, format, parseMention, getRandom } = require('../lib/peacefunc');
 const { exec, spawn, execSync } = require("child_process");
+
+// ── ANTIDELETE / ANTIEDIT ── module-level so listener registers ONCE per client ──
+const _msgStore = new Map();
+const _delProcessed = new Set();
+const _editProcessed = new Set();
+const _stickerProcessed = new Set();
+setInterval(() => { _delProcessed.clear(); _editProcessed.clear(); _stickerProcessed.clear(); }, 60000);
+let _attachedClient = null;
+
+async function _handleDeleted(client, mek, mode) {
+    try {
+        const id = mek.message.protocolMessage.key.id;
+        if (_delProcessed.has(id)) return;
+        _delProcessed.add(id);
+        if (mek.key.fromMe) return; // bot's own deletion — never restore
+        const original = _msgStore.get(id);
+        if (!original) return;
+        const remoteJid = mek.key.remoteJid;
+        const botJid = client.user.id.split(':')[0] + '@s.whatsapp.net';
+        const deletedBy = mek.participant || remoteJid;
+        const sentBy = original.key.participant || original.key.remoteJid;
+        if (deletedBy === botJid || sentBy === botJid) return;
+        const s = await fetchSettings();
+        const ownerJid = (s.owner?.[0]?.replace(/[^0-9]/g, '') || '') + '@s.whatsapp.net';
+        const target = (mode === 'private' && ownerJid) ? ownerJid : remoteJid;
+        if (!target) return;
+        const now = new Date();
+        const header = `🚨 *KING M ANTIDELETE* 🚨\n\n👤 *Deleted By:* @${deletedBy.split('@')[0]}\n✉️ *Sent By:* @${sentBy.split('@')[0]}\n⏰ *Time:* ${now.toLocaleTimeString()}\n\n`;
+        const msg = original.message;
+        if (msg?.conversation || msg?.extendedTextMessage?.text) {
+            const txt = msg?.conversation || msg?.extendedTextMessage?.text;
+            await client.sendMessage(target, { text: header + '📝 *Message:* ' + txt, mentions: [deletedBy, sentBy] });
+        } else {
+            const buffer = await downloadMediaMessage(original, 'buffer', {});
+            if (msg?.imageMessage)   await client.sendMessage(target, { image: buffer, caption: header + '🖼️ *Deleted Photo*', mentions: [deletedBy, sentBy] });
+            else if (msg?.videoMessage)  await client.sendMessage(target, { video: buffer, caption: header + '🎥 *Deleted Video*', mentions: [deletedBy, sentBy] });
+            else if (msg?.stickerMessage) await client.sendMessage(target, { sticker: buffer });
+            else if (msg?.audioMessage)  await client.sendMessage(target, { audio: buffer, mimetype: 'audio/mpeg' });
+        }
+        _msgStore.delete(id);
+    } catch (_) {}
+}
+
+function attachAntiListeners(client) {
+    if (_attachedClient === client) return; // already registered for this client session
+    _attachedClient = client;
+
+    // ── Store messages + ANTIDELETE ──
+    client.ev.on('messages.upsert', async ({ messages }) => {
+        const mek = messages[0];
+        if (!mek?.message) return;
+        // Store all non-protocol messages for antidelete/antiedit lookup
+        if (mek.key?.id && !mek.message.protocolMessage) {
+            _msgStore.set(mek.key.id, mek);
+            if (_msgStore.size > 2000) _msgStore.delete(_msgStore.keys().next().value);
+        }
+        const s = await fetchSettings();
+        const adMode = s.antidelete || 'off';
+        if (adMode !== 'off' && mek.message?.protocolMessage?.type === 0) {
+            await _handleDeleted(client, mek, adMode);
+        }
+    });
+
+    // ── ANTIEDIT — Baileys emits messages.update (not upsert) for edits ──
+    client.ev.on('messages.update', async (updates) => {
+        for (const { key, update } of updates) {
+            if (!update?.message?.editedMessage) continue;
+            const s = await fetchSettings();
+            const aeMode = s.antiedit || 'off';
+            if (aeMode === 'off') continue;
+            const editId = key.id; // ID of the original message
+            if (_editProcessed.has(editId)) continue;
+            _editProcessed.add(editId);
+            if (key.fromMe) continue;
+            const botJid = client.user.id.split(':')[0] + '@s.whatsapp.net';
+            const editorJid = key.participant || key.remoteJid;
+            if (editorJid === botJid) continue;
+            try {
+                const original = _msgStore.get(editId);
+                const remoteJid = key.remoteJid;
+                const ownerJid = (s.owner?.[0]?.replace(/[^0-9]/g, '') || '') + '@s.whatsapp.net';
+                const target = (aeMode === 'private' && ownerJid) ? ownerJid : remoteJid;
+                if (!target) continue;
+                const editedMsg = update.message.editedMessage?.message || {};
+                const newText = editedMsg?.conversation || editedMsg?.extendedTextMessage?.text || editedMsg?.imageMessage?.caption || editedMsg?.videoMessage?.caption || '*(media)*';
+                const oldMsg = original?.message || {};
+                const oldText = oldMsg?.conversation || oldMsg?.extendedTextMessage?.text || oldMsg?.imageMessage?.caption || oldMsg?.videoMessage?.caption || '*(not cached)*';
+                const report = `✏️ *KING M ANTIEDIT* ✏️\n\n👤 *Edited By:* @${editorJid.split('@')[0]}\n⏰ *Time:* ${new Date().toLocaleTimeString()}\n\n📝 *Before:* ${oldText}\n\n✏️ *After:* ${newText}`;
+                await client.sendMessage(target, { text: report, mentions: [editorJid] });
+            } catch (_) {}
+        }
+    });
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 module.exports = peace = async (client, m, chatUpdate, store) => {
   try {
 
@@ -263,158 +358,8 @@ function handleIncomingMessage(message) {
   saveChatData(remoteJid, messageId, chatData);
 } 
           
-          // ================== ANTIDELETE FUNCTION ==================
-          // ================== SIMPLE ANTIDELETE SYSTEM ==================
-// ================== FIXED ANTIDELETE SYSTEM ==================
-// ================== FIXED STABLE ANTIDELETE SYSTEM ==================
-const messageStore = new Map();
-const deletionProcessed = new Set();
-const editProcessed = new Set();
-
-// Auto-clean the dedup sets every 60 seconds
-setInterval(() => { deletionProcessed.clear(); editProcessed.clear(); }, 60000);
-
-// Helper to store only valid messages
-function storeIncomingMessage(mek) {
-    if (!mek?.key?.id || mek.message?.protocolMessage) return; 
-    messageStore.set(mek.key.id, mek);  
-    // Keep memory safe: store last 2000 msgs
-    if (messageStore.size > 2000) {  
-        const firstKey = messageStore.keys().next().value;  
-        messageStore.delete(firstKey);  
-    }
-}
-
-async function handleDeletedMessage(client, mek, antideleteMode) {
-    try {
-        const deletedMsgId = mek.message.protocolMessage.key.id;
-        if (deletionProcessed.has(deletedMsgId)) return; // dedup
-        deletionProcessed.add(deletedMsgId);
-        // If the bot itself sent this deletion (e.g. antisticker), never restore it
-        if (mek.key.fromMe) return;
-        const originalMessage = messageStore.get(deletedMsgId);  
-        if (!originalMessage) return;  
-
-        const remoteJid = mek.key.remoteJid;  
-        const botJid = client.user.id.split(":")[0] + "@s.whatsapp.net";  
-        const deletedBy = mek.participant || remoteJid;  
-        const sentBy = originalMessage.key.participant || originalMessage.key.remoteJid;  
-
-        // Don't report if the bot deleted it or the bot sent it
-        if (deletedBy === botJid || sentBy === botJid) return;  
-
-        // Fetch owner from settings safely
-        const adSettings = await fetchSettings();
-        const ownerNum = adSettings.owner?.[0]?.replace(/[^0-9]/g, '') || '';
-        const ownerJid = ownerNum ? ownerNum + '@s.whatsapp.net' : null;
-        let targetJid = (antideleteMode === "private" && ownerJid) ? ownerJid : remoteJid;
-        if (!targetJid) return;
-        
-        const now = new Date();  
-        let header = `🚨 *KING M ANTIDELETE* 🚨\n\n` +
-                     `👤 *Deleted By:* @${deletedBy.split('@')[0]}\n` +
-                     `✉️ *Sent By:* @${sentBy.split('@')[0]}\n` +
-                     `⏰ *Time:* ${now.toLocaleTimeString()}\n\n`;
-
-        const msg = originalMessage.message;  
-
-        // Send content based on type
-        if (msg?.conversation || msg?.extendedTextMessage?.text) {  
-            let textContent = msg?.conversation || msg?.extendedTextMessage?.text;
-            await client.sendMessage(targetJid, { text: header + "📝 *Message:* " + textContent, mentions: [deletedBy, sentBy] });  
-        } else {
-            // For media, use standalone downloadMediaMessage (not client method)
-            const buffer = await downloadMediaMessage(originalMessage, 'buffer', {});
-            if (msg?.imageMessage) await client.sendMessage(targetJid, { image: buffer, caption: header + "🖼️ *Deleted Photo*", mentions: [deletedBy, sentBy] });
-            else if (msg?.videoMessage) await client.sendMessage(targetJid, { video: buffer, caption: header + "🎥 *Deleted Video*", mentions: [deletedBy, sentBy] });
-            else if (msg?.stickerMessage) await client.sendMessage(targetJid, { sticker: buffer });
-            else if (msg?.audioMessage) await client.sendMessage(targetJid, { audio: buffer, mimetype: "audio/mpeg" });
-        }
-
-        messageStore.delete(deletedMsgId); // Clear after retrieval
-    } catch (err) {  
-        // silently ignore antidelete errors
-    }
-}
-
-// THIS IS THE MAIN LISTENER - Put this at the very end of peace.js logic
-client.ev.on('messages.upsert', async ({ messages }) => {
-    const mek = messages[0];
-    if (!mek.message) return;
-
-    // Fetch the setting
-    const settings = await fetchSettings();
-    const antidelete = settings.antidelete || "off";
-    const antieditMode = settings.antiedit || "off";
-
-    if (antidelete !== "off") {
-        if (mek.message?.protocolMessage?.type === 0) {
-            // It's a deletion!
-            await handleDeletedMessage(client, mek, antidelete);
-        } else {
-            // It's a normal message, store it.
-            storeIncomingMessage(mek);
-        }
-    }
-
-    // ===== ANTIEDIT HANDLER =====
-    if (antieditMode !== "off") {
-        // Edited messages come as protocolMessage type 14
-        const isEdit = mek.message?.protocolMessage?.type === 14;
-        const editedMsgId = isEdit ? mek.message.protocolMessage.key.id : null;
-        const editedProto = isEdit ? mek.message.protocolMessage.editedMessage : null;
-
-        if (isEdit && editedProto) {
-            try {
-                if (editProcessed.has(editedMsgId)) return; // dedup
-                editProcessed.add(editedMsgId);
-                if (mek.key.fromMe) return; // ignore bot's own edits
-                const originalMessage = messageStore.get(editedMsgId);
-                const editorJid = mek.participant || mek.key.remoteJid;
-                const remoteJid = mek.key.remoteJid;
-                const botJid = client.user.id.split(':')[0] + '@s.whatsapp.net';
-
-                // Don't report bot's own edits
-                if (editorJid === botJid) return;
-
-                const newText = editedProto?.conversation ||
-                    editedProto?.extendedTextMessage?.text ||
-                    editedProto?.imageMessage?.caption ||
-                    editedProto?.videoMessage?.caption ||
-                    '*(media/unsupported)*';
-
-                const oldText = originalMessage?.message?.conversation ||
-                    originalMessage?.message?.extendedTextMessage?.text ||
-                    originalMessage?.message?.imageMessage?.caption ||
-                    originalMessage?.message?.videoMessage?.caption ||
-                    '*(unknown/media)*';
-
-                const now = new Date();
-                const report =
-                    `✏️ *KING M ANTIEDIT* ✏️\n\n` +
-                    `👤 *Edited By:* @${editorJid.split('@')[0]}\n` +
-                    `⏰ *Time:* ${now.toLocaleTimeString()}\n\n` +
-                    `📝 *Before:* ${oldText}\n\n` +
-                    `✏️ *After:* ${newText}`;
-
-                const ownerNum = settings.owner?.[0]?.replace(/[^0-9]/g, '');
-                const ownerJid = ownerNum ? ownerNum + '@s.whatsapp.net' : null;
-                const targetJid = (antieditMode === 'private' && ownerJid) ? ownerJid : remoteJid;
-
-                if (!targetJid) return;
-
-                await client.sendMessage(targetJid, {
-                    text: report,
-                    mentions: [editorJid]
-                });
-            } catch (err) {
-                // silently ignore — antiedit errors are not critical
-            }
-        }
-    }
-});
-//========================================================================================================================//
-//========================================================================================================================//      
+  // Register antidelete/antiedit listener once per client session
+  attachAntiListeners(client);      
     // Push Message To Console
     // This ensures budy exists before trying to check its length
 let messageText = budy || ""; 
@@ -460,7 +405,8 @@ if (antisticker && antisticker !== 'off' && isSticker) {
     
     // 3. Permissions: Only act if Bot is Admin & User is NOT Admin/Owner
     if (!Owner && isBotAdmin && !isAdmin && m.isGroup) {
-        
+        if (_stickerProcessed.has(m.key.id)) return;
+        _stickerProcessed.add(m.key.id);
         const kid = m.sender;
         const userTag = `@${kid.split("@")[0]}`;
 

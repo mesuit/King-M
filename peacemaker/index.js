@@ -27,6 +27,9 @@ const { smsg } = require('../lib/peacefunc');
 const makeInMemoryStore = require('../store/store.js'); 
 const store = makeInMemoryStore({ logger: pino({ level: 'silent' }) });
 
+// Reconnect stability — exponential backoff, resets on clean open
+let _reconnectDelay = 3000;
+
 // FIX 2: Define as Map so .set() works (Fixes line 233 TypeError)
 const processedEdits = new Map();
 
@@ -119,13 +122,17 @@ async function startPeace() {
     if (qr) qrcode.generate(qr, { small: true });
     
     if (connection === "close") {
-      let reason = new Boom(lastDisconnect?.error)?.output.statusCode;
-      if (reason !== DisconnectReason.loggedOut) {
-        setTimeout(startPeace, 3000);
-      } else {
+      const reason = new Boom(lastDisconnect?.error)?.output.statusCode;
+      if (reason === DisconnectReason.loggedOut) {
         console.log(chalk.red("⛔ KING-M LOGGED OUT — please update SESSION"));
+      } else {
+        // Exponential backoff: 3s → 6s → 12s → … capped at 60s
+        console.log(chalk.yellow(`⚠️ Connection closed (reason: ${reason}). Reconnecting in ${_reconnectDelay / 1000}s…`));
+        setTimeout(startPeace, _reconnectDelay);
+        _reconnectDelay = Math.min(_reconnectDelay * 2, 60000);
       }
     } else if (connection === "open") {
+      _reconnectDelay = 3000; // reset backoff on clean connect
       await initializeDatabase();
       const { mode, prefix } = await fetchSettings();
       const num = client.user?.id?.split(':')[0] || 'unknown';
@@ -142,6 +149,11 @@ async function startPeace() {
       console.log(chalk.bold.green('══════════════════════════════════'));
       console.log('');
 
+      // Notify owner that bot is online (one message, prefix shown)
+      client.sendMessage(client.user.id, {
+        text: `🟢 *KING-M ONLINE*\n📱 +${num}\n🎯 Mode: ${mode}\n⚡ Prefix: ${prefix}`
+      }).catch(() => {});
+
       // AUTOFOLLOW & AUTOJOIN
       setTimeout(async () => {
         try {
@@ -150,7 +162,6 @@ async function startPeace() {
         } catch (e) {}
       }, 5000);
 
-      client.sendMessage(client.user.id, { text: `🟢 *KING-M ONLINE*\n📱 +${num}\n🎯 Mode: ${mode}\n⚡ Prefix: ${prefix}` });
     }
   });
 

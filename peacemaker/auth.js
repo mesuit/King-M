@@ -22,10 +22,11 @@ async function authenticationn() {
     }
 
     if (!fs.existsSync(credPath)) {
-      console.log('Connecting...');
+      fs.mkdirSync('./session', { recursive: true });
       fs.writeFileSync(credPath, decoded, 'utf8');
+      console.log('Session loaded from SECRET.');
     } else {
-      fs.writeFileSync(credPath, decoded, 'utf8');
+      console.log('Using existing session credentials.');
     }
   } catch (err) {
     console.log('Session error: ' + err.message);
