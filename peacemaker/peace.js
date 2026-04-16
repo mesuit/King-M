@@ -63,7 +63,7 @@ const acrcloud = require("acrcloud");
 const ytdl = require("ytdl-core");
 const Client = new Genius.Client("TUoAEhL79JJyU-MpOsBDkFhJFWFH28nv6dgVgPA-9R1YRwLNP_zicdX2omG2qKE8gYLJat5F5VSBNLfdnlpfJg"); // Scrapes if no key is provided
 const { downloadYouTube, downloadSoundCloud, downloadSpotify, searchYouTube, searchSoundCloud, searchSpotify } = require('../peacemaker/wee');
-const { getSettings, updateSetting } = require('../Database/config');
+const { getSettings, updateSetting, getSudoOwners } = require('../Database/config');
 
 // Persistent in-memory warn store: key = `groupJid_userJid` → count
 const warnStore = new Map();
@@ -102,8 +102,11 @@ async function _handleDeleted(client, mek, mode) {
         const sentBy = original.key.participant || original.key.remoteJid;
         if (deletedBy === botJid || sentBy === botJid) return;
         const s = await fetchSettings();
-        const ownerJid = (s.owner?.[0]?.replace(/[^0-9]/g, '') || '') + '@s.whatsapp.net';
-        const target = (mode === 'private' && ownerJid) ? ownerJid : remoteJid;
+        // owner lives in sudo_owners table, not bot_settings — fetch it correctly
+        const owners = await getSudoOwners();
+        const ownerNum = owners?.[0]?.replace(/[^0-9]/g, '') || client.user.id.split(':')[0];
+        const ownerJid = ownerNum + '@s.whatsapp.net';
+        const target = (mode === 'private') ? ownerJid : remoteJid;
         if (!target) return;
         const now = new Date();
         const header = `🚨 *KING M ANTIDELETE* 🚨\n\n👤 *Deleted By:* @${deletedBy.split('@')[0]}\n✉️ *Sent By:* @${sentBy.split('@')[0]}\n⏰ *Time:* ${now.toLocaleTimeString()}\n\n`;
@@ -159,8 +162,10 @@ function attachAntiListeners(client) {
             try {
                 const original = _msgStore.get(editId);
                 const remoteJid = key.remoteJid;
-                const ownerJid = (s.owner?.[0]?.replace(/[^0-9]/g, '') || '') + '@s.whatsapp.net';
-                const target = (aeMode === 'private' && ownerJid) ? ownerJid : remoteJid;
+                const owners = await getSudoOwners();
+                const ownerNum = owners?.[0]?.replace(/[^0-9]/g, '') || client.user.id.split(':')[0];
+                const ownerJid = ownerNum + '@s.whatsapp.net';
+                const target = (aeMode === 'private') ? ownerJid : remoteJid;
                 if (!target) continue;
                 const editedMsg = update.message.editedMessage?.message || {};
                 const newText = editedMsg?.conversation || editedMsg?.extendedTextMessage?.text || editedMsg?.imageMessage?.caption || editedMsg?.videoMessage?.caption || '*(media)*';
@@ -1532,37 +1537,37 @@ case 'antidelete': {
         const validModes = ['off', 'private', 'chat'];
         const newMode = args[0]?.toLowerCase().trim();
 
-        if (!client.settings) client.settings = {};  
+        // Show current status if no valid arg given
+        if (!newMode || !validModes.includes(newMode)) {
+            const s = await fetchSettings();
+            const currentMode = s.antidelete || 'off';
+            return m.reply(
+                `🛡️ *KING M ANTIDELETE*\n\n` +
+                `Current Mode: *${currentMode}*\n\n` +
+                `Usage:\n` +
+                `• ${prefix}antidelete off\n` +
+                `• ${prefix}antidelete private\n` +
+                `• ${prefix}antidelete chat`
+            );
+        }
 
-        if (!newMode || !validModes.includes(newMode)) {  
-            const currentMode = client.settings.antidelete || 'off';  
+        // Save to database
+        await updateSetting('antidelete', newMode);
+        // Flush cache so the listener picks up the new value immediately
+        fetchSettings.invalidate();
 
-            // FIXED: Wrapped the text below in backticks
-            return m.reply(  
-                `🛡️ *KING M ANTIDELETE*\n\n` +  
-                `Current Mode: *${currentMode}*\n\n` +  
-                `Usage:\n` +  
-                `• ${prefix}antidelete off\n` +  
-                `• ${prefix}antidelete private\n` +  
-                `• ${prefix}antidelete chat`  
-            );  
-        }  
+        const response =
+            newMode === 'off'
+                ? '❌ AntiDelete *Disabled*'
+                : newMode === 'private'
+                ? '🔒 AntiDelete set to *PRIVATE* — deleted msgs sent to owner DM'
+                : '💬 AntiDelete set to *CHAT* — deleted msgs revealed in same chat';
 
-        client.settings.antidelete = newMode;  
-
-        let response =  
-            newMode === 'off'  
-                ? '❌ AntiDelete Disabled'  
-                : newMode === 'private'  
-                ? '🔒 AntiDelete set to PRIVATE (Owner only)'  
-                : '💬 AntiDelete set to CHAT (Same chat)';  
-
-        // FIXED: Added backticks around the success message
         return m.reply(`✅ ${response}`);
 
     } catch (err) {
-        logError('Antidelete Command ', err);
-        return m.reply("❌ Failed to update AntiDelete setting.");
+        logError('Antidelete Command', err);
+        return m.reply('❌ Failed to update AntiDelete setting.');
     }
 }
 break;
@@ -1584,8 +1589,7 @@ break;
     const success = await db.updateSetting('antiedit', newMode);
 
     if (success) {
-      // Refresh settings in memory
-      client.settings = await db.getSettings();
+      fetchSettings.invalidate();
       m.reply(`✅ Antiedit mode set to *${newMode}*`);
       console.log(`[SETTINGS] Antiedit updated to ${newMode} by ${m.sender.split('@')[0]}`);
     } else {
