@@ -86,6 +86,8 @@ const _delProcessed = new Set();
 const _editProcessed = new Set();
 const _stickerProcessed = new Set();
 setInterval(() => { _delProcessed.clear(); _editProcessed.clear(); _stickerProcessed.clear(); }, 60000);
+// .mygroups session store: userJid → { groups: [{num, name, jid}], timer }
+const _mygroupsSessions = new Map();
 let _attachedClient = null;
 
 async function _handleDeleted(client, mek, mode) {
@@ -261,7 +263,9 @@ const {
     // Allow fromMe COMMANDS (starts with prefix) — owner uses the bot's own phone.
     // Block fromMe NON-commands in public mode (prevents chatbot reply loops).
     if (m.isBaileys) return;
-    if (m.fromMe && mode !== 'self' && !messageBody.startsWith(prefix)) return;
+    // Allow through if owner has an active .mygroups session (number reply has no prefix)
+    const _hasActiveSession = _mygroupsSessions.has(m.sender);
+    if (m.fromMe && mode !== 'self' && !messageBody.startsWith(prefix) && !_hasActiveSession) return;
     // ─────────────────────────────────────────────────────────────────────────
     const mek = chatUpdate.messages[0];
           // ==================================
@@ -806,6 +810,31 @@ if (antilinkall === 'on' && body.includes('https://') && !Owner && isBotAdmin &&
 //========================================================================================================================//      
     
   
+  // ── .mygroups number-reply interceptor ──
+  // If the user sends a plain number (no prefix) and has an active .mygroups session, return the group JID
+  if (!messageBody.startsWith(prefix) && /^\d+$/.test(messageBody.trim())) {
+    const session = _mygroupsSessions.get(m.sender);
+    if (session) {
+      const pick = parseInt(messageBody.trim(), 10);
+      const entry = session.groups.find(g => g.num === pick);
+      if (entry) {
+        clearTimeout(session.timer);
+        _mygroupsSessions.delete(m.sender);
+        // Message 1: summary with name
+        await client.sendMessage(m.chat, {
+          text: `✅ *Group Selected!*\n\n📛 *Name:* ${entry.name}\n\n👇 *Group ID below — long press to copy:*`,
+        }, { quoted: m });
+        // Message 2: bare JID only — easiest to long-press & copy
+        await client.sendMessage(m.chat, { text: entry.jid });
+        // Message 3: ready-to-use command template
+        await client.sendMessage(m.chat, {
+          text: `📋 *Ready-to-use command:*\n${prefix}gstatus2 ${entry.jid} your message here`,
+        });
+        return;
+      }
+    }
+  }
+
   if (cmd) {
     switch (command) {
         case "menu":
@@ -943,7 +972,9 @@ let cap = `
 
 ┏▣ 👥 *GROUP MANAGER* 👥
 │ ⬡ approve
-│ ⬡ gstatus
+│ ⬡ gstatus  ← post status in group
+│ ⬡ mygroups  ← list all groups (reply number to get ID)
+│ ⬡ gstatus2 <groupId> <msg>  ← post to group from DM
 │ ⬡ reject
 │ ⬡ promote
 │ ⬡ demote
@@ -1531,6 +1562,139 @@ case 'gs': {
     }
 }
 break;
+
+// ================== MYGROUPS COMMAND ==================
+case 'mygroups': {
+    try {
+        await client.sendMessage(m.chat, { react: { text: '⏳', key: m.key } });
+
+        const allGroups = await client.groupFetchAllParticipating();
+        const groupList = Object.values(allGroups);
+
+        if (!groupList.length) {
+            return reply('❌ I am not in any groups yet.');
+        }
+
+        // Build numbered list and store session
+        const entries = groupList.map((g, i) => ({
+            num: i + 1,
+            name: g.subject || 'Unknown Group',
+            jid: g.id
+        }));
+
+        // Clear any previous session for this user
+        const prev = _mygroupsSessions.get(m.sender);
+        if (prev) clearTimeout(prev.timer);
+
+        // Auto-expire session after 5 minutes
+        const timer = setTimeout(() => _mygroupsSessions.delete(m.sender), 5 * 60 * 1000);
+        _mygroupsSessions.set(m.sender, { groups: entries, timer });
+
+        // Build message (paginate if too many — 50 per page)
+        const lines = entries.map(e => `*${e.num}.* ${e.name}`).join('\n');
+        const msg =
+            `📋 *MY GROUPS* — ${entries.length} groups\n` +
+            `━━━━━━━━━━━━━━━━━━━━\n` +
+            `${lines}\n` +
+            `━━━━━━━━━━━━━━━━━━━━\n` +
+            `_Reply with a number to get the Group ID_\n` +
+            `_Session expires in 5 minutes_`;
+
+        await client.sendMessage(m.chat, { text: msg }, { quoted: m });
+        await client.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
+
+    } catch (err) {
+        logError('mygroups', err);
+        reply(`❌ Failed to fetch groups: ${err.message}`);
+    }
+}
+break;
+
+// ================== GSTATUS2 — SEND GROUP STATUS FROM DM ==================
+case 'gstatus2':
+case 'gcstatus2': {
+    if (!Owner) return reply('❌ Owner only command.');
+
+    const [targetJid, ...msgParts] = args;
+
+    if (!targetJid) {
+        return reply(
+            `📌 *Usage:*\n` +
+            `• ${prefix}gstatus2 <groupId> <text>\n` +
+            `• Reply to media with ${prefix}gstatus2 <groupId> <caption>\n\n` +
+            `_Get the group ID using_ \`${prefix}mygroups\``
+        );
+    }
+
+    const gcJid = targetJid.includes('@g.us') ? targetJid : `${targetJid}@g.us`;
+    const gcText = msgParts.join(' ');
+
+    let tempFilePath2 = null;
+    const tempDir2 = path.join(__dirname, '../tmp');
+    if (!fs.existsSync(tempDir2)) fs.mkdirSync(tempDir2, { recursive: true });
+
+    await client.sendMessage(m.chat, { react: { text: '⏳', key: m.key } });
+
+    try {
+        // ── Exact .gs logic — only m.chat replaced with gcJid ──
+        let payload = { groupStatusMessage: {} };
+        const successMessage = `✅ *Status Posted Successfully!*`;
+
+        if (m.quoted) {
+            const mime = (m.quoted.msg || m.quoted).mimetype || "";
+            const q = gcText || "";
+
+            if (/image/.test(mime)) {
+                const buffer = await downloadMediaMessage(m.quoted.fakeObj || m.quoted, 'buffer', {});
+                tempFilePath2 = path.join(tempDir2, `gs2_${Date.now()}.jpg`);
+                fs.writeFileSync(tempFilePath2, buffer);
+                payload.groupStatusMessage.image = { url: tempFilePath2 };
+                payload.groupStatusMessage.caption = q || m.quoted.caption || "";
+
+            } else if (/video/.test(mime)) {
+                const buffer = await downloadMediaMessage(m.quoted.fakeObj || m.quoted, 'buffer', {});
+                tempFilePath2 = path.join(tempDir2, `gs2_${Date.now()}.mp4`);
+                fs.writeFileSync(tempFilePath2, buffer);
+                payload.groupStatusMessage.video = { url: tempFilePath2 };
+                payload.groupStatusMessage.caption = q || m.quoted.caption || "";
+
+            } else if (/audio/.test(mime)) {
+                const buffer = await downloadMediaMessage(m.quoted.fakeObj || m.quoted, 'buffer', {});
+                tempFilePath2 = path.join(tempDir2, `gs2_${Date.now()}.mp3`);
+                fs.writeFileSync(tempFilePath2, buffer);
+                payload.groupStatusMessage.audio = { url: tempFilePath2 };
+
+            } else if (/webp/.test(mime)) {
+                const buffer = await downloadMediaMessage(m.quoted.fakeObj || m.quoted, 'buffer', {});
+                tempFilePath2 = path.join(tempDir2, `gs2_${Date.now()}.webp`);
+                fs.writeFileSync(tempFilePath2, buffer);
+                payload.groupStatusMessage.sticker = { url: tempFilePath2 };
+
+            } else if (m.quoted.text || m.quoted.conversation) {
+                payload.groupStatusMessage.text = m.quoted.text || m.quoted.conversation;
+            }
+        } else {
+            if (!gcText) return reply(`❌ Provide a message or reply to media.\nUsage: ${prefix}gstatus2 ${targetJid} Hello group!`);
+            payload.groupStatusMessage.text = gcText;
+        }
+
+        // Send to target group JID — no quoted: m (DM key can't be resolved in group context)
+        await client.sendMessage(gcJid, payload);
+
+        await client.sendMessage(m.chat, { text: successMessage }, { quoted: m });
+        await client.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
+
+    } catch (err) {
+        logError('gstatus2', err);
+        reply(`❌ Failed: ${err.message}\n\n_Make sure the bot is in that group and the ID is correct._`);
+    } finally {
+        if (tempFilePath2 && fs.existsSync(tempFilePath2)) {
+            try { fs.unlinkSync(tempFilePath2); } catch (_) {}
+        }
+    }
+}
+break;
+
 // ================== ANTIDELETE COMMAND ==================
 case 'antidelete': {
     try {
