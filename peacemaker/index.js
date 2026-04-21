@@ -149,10 +149,25 @@ async function startPeace() {
       console.log(chalk.bold.green('══════════════════════════════════'));
       console.log('');
 
-      // Notify owner that bot is online (one message, prefix shown)
-      client.sendMessage(client.user.id, {
-        text: `🟢 *KING-M ONLINE*\n📱 +${num}\n🎯 Mode: ${mode}\n⚡ Prefix: ${prefix}`
-      }).catch(() => {});
+      // Notify owner that bot is online — dedup across reconnects/restarts.
+      // Only send if last notification was more than 10 minutes ago.
+      try {
+        const notifyFlag = path.join(__dirname, '../session/.startup_notified');
+        const NOTIFY_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes
+        let shouldNotify = true;
+        if (fs.existsSync(notifyFlag)) {
+          const last = parseInt(fs.readFileSync(notifyFlag, 'utf8').trim(), 10);
+          if (!isNaN(last) && (Date.now() - last) < NOTIFY_COOLDOWN_MS) {
+            shouldNotify = false;
+          }
+        }
+        if (shouldNotify) {
+          client.sendMessage(client.user.id, {
+            text: `🟢 *KING-M ONLINE*\n📱 +${num}\n🎯 Mode: ${mode}\n⚡ Prefix: ${prefix}`
+          }).catch(() => {});
+          fs.writeFileSync(notifyFlag, String(Date.now()));
+        }
+      } catch (_) {}
 
       // AUTOFOLLOW & AUTOJOIN
       setTimeout(async () => {
