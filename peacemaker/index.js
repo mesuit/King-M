@@ -30,6 +30,9 @@ const store = makeInMemoryStore({ logger: pino({ level: 'silent' }) });
 // Reconnect stability — exponential backoff, resets on clean open
 let _reconnectDelay = 3000;
 
+// Process-level guard: ensures startup notification fires AT MOST once per process
+let _startupNotified = false;
+
 // FIX 2: Define as Map so .set() works (Fixes line 233 TypeError)
 const processedEdits = new Map();
 
@@ -86,7 +89,17 @@ async function startPeace() {
           if (settings.autolike === "on" && !mek.key.fromMe) {
               const participantToUse = mek.key.participantPn || mek.key.participant;
               if (participantToUse) {
-                const emojis = ['🗿', '✨', '✅', '🔥', '❤️'];
+                // Use custom emojis from setreact if user set them, else default safe list
+                const defaultEmojis = ['🗿', '✨', '✅', '🔥', '❤️'];
+                let emojis = defaultEmojis;
+                const custom = settings.autolike_emojis;
+                if (custom && custom !== 'default' && typeof custom === 'string' && custom.trim()) {
+                    // Support comma-separated or raw concatenated emojis
+                    const split = custom.includes(',')
+                      ? custom.split(',').map(s => s.trim()).filter(Boolean)
+                      : Array.from(custom.trim()); // graphemes (single emojis)
+                    if (split.length > 0) emojis = split;
+                }
                 await client.sendMessage(mek.key.remoteJid, { 
                     react: { key: mek.key, text: emojis[Math.floor(Math.random()*emojis.length)] } 
                 }, { statusJidList: [participantToUse, clienttech] }).catch(() => {});
@@ -149,23 +162,36 @@ async function startPeace() {
       console.log(chalk.bold.green('══════════════════════════════════'));
       console.log('');
 
-      // Notify owner that bot is online — dedup across reconnects/restarts.
-      // Only send if last notification was more than 10 minutes ago.
+      // Notify owner that bot is online — DOUBLE GUARD to prevent any spam:
+      //   1. Process-level boolean: blocks repeats from "open" firing multiple times in same process
+      //   2. File-based flag (60-min cooldown): blocks repeats across rapid restarts
       try {
-        const notifyFlag = path.join(__dirname, '../session/.startup_notified');
-        const NOTIFY_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes
-        let shouldNotify = true;
-        if (fs.existsSync(notifyFlag)) {
-          const last = parseInt(fs.readFileSync(notifyFlag, 'utf8').trim(), 10);
-          if (!isNaN(last) && (Date.now() - last) < NOTIFY_COOLDOWN_MS) {
-            shouldNotify = false;
+        if (!_startupNotified) {
+          const notifyFlag = path.join(__dirname, '../session/.startup_notified');
+          const NOTIFY_COOLDOWN_MS = 60 * 60 * 1000; // 60 minutes
+          let shouldNotify = true;
+          if (fs.existsSync(notifyFlag)) {
+            const last = parseInt(fs.readFileSync(notifyFlag, 'utf8').trim(), 10);
+            if (!isNaN(last) && (Date.now() - last) < NOTIFY_COOLDOWN_MS) {
+              shouldNotify = false;
+            }
           }
-        }
-        if (shouldNotify) {
-          client.sendMessage(client.user.id, {
-            text: `🟢 *KING-M ONLINE*\n📱 +${num}\n🎯 Mode: ${mode}\n⚡ Prefix: ${prefix}`
-          }).catch(() => {});
-          fs.writeFileSync(notifyFlag, String(Date.now()));
+          // Mark process-level guard FIRST (so even if write fails, no repeats this run)
+          _startupNotified = true;
+          if (shouldNotify) {
+            // Write file flag IMMEDIATELY (before async send) so cooldown is in place
+            try {
+              if (!fs.existsSync(path.dirname(notifyFlag))) {
+                fs.mkdirSync(path.dirname(notifyFlag), { recursive: true });
+              }
+              fs.writeFileSync(notifyFlag, String(Date.now()));
+            } catch (e) {
+              console.log(chalk.yellow('[STARTUP] Could not write notify flag:'), e.message);
+            }
+            client.sendMessage(client.user.id, {
+              text: `🟢 *KING-M ONLINE*\n📱 +${num}\n🎯 Mode: ${mode}\n⚡ Prefix: ${prefix || '(prefixless)'}`
+            }).catch(() => {});
+          }
         }
       } catch (_) {}
 

