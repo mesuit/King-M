@@ -35,6 +35,8 @@ let _startupNotified = false;
 
 // FIX 2: Define as Map so .set() works (Fixes line 233 TypeError)
 const processedEdits = new Map();
+const processedCalls = new Set();
+setInterval(() => processedCalls.clear(), 600000);
 
 authenticationn();
 
@@ -121,14 +123,26 @@ async function startPeace() {
   // ========== ANTICALL (MAINTAINED) ==========
   client.ev.on('call', async (callData) => {
     try {
-      const { anticall } = await fetchSettings();
-      if (anticall === 'on') {
-        const { id, from } = callData[0];
-        await client.rejectCall(id, from);
-        await client.sendMessage(from, { text: "🚫 Anticall is active. Please use text." });
-      }
-    } catch (e) {}
-  });
+        const { anticall } = await fetchSettings();
+        if (anticall === 'on') {
+            const { id, from, status } = callData[0];
+            
+            // Only act if the call is 'offer' (incoming) and hasn't been processed
+            if (status === 'offer' && !processedCalls.has(id)) {
+                processedCalls.add(id); // Mark as processed immediately
+                
+                await client.rejectCall(id, from);
+                await client.sendMessage(from, { 
+                    text: "🚫 *Anticall is active.* Please use text messages to communicate." 
+                });
+                
+                console.log(chalk.yellow(`[ANTICALL] Rejected call ${id} from ${from}`));
+            }
+        }
+    } catch (e) {
+        console.error('[ANTICALL ERROR]', e.message);
+    }
+});
 
   client.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect, qr } = update;
