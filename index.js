@@ -67,7 +67,7 @@
 const SESSION = process.env.SESSION || '';
 const isReplit = !!(process.env.REPL_ID || process.env.REPL_SLUG);
 
-if (isReplit && !SESSION) {
+if (false && isReplit && !SESSION) {
   // ─── REPLIT (no session): lightweight gateway that proxies to the VPS deployer ──────
   const express = require('express');
   const axios   = require('axios');

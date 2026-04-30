@@ -2273,51 +2273,43 @@ await client.sendMessage(
 break;
 
 //========================================================================================================================//                          
-  case "play": {                      
- if (!text) {
-      return client.sendMessage(from, { text: 'Please provide a song name.' }, { quoted: m });
+  case "play": {
+    if (!text) return reply(`⚠️ *Usage:* ${prefix}play <Song Name>`);
+    try {
+      await client.sendMessage(m.chat, { react: { text: '⏳', key: m.key } });
+      const search = await yts(text);
+      if (!search.all || !search.all.length) return reply('❌ No results found.');
+      const vid = search.all[0];
+      const link = vid.url;
+      const title = vid.title;
+      const thumbnail = vid.thumbnail || '';
+      m.reply(`_⬇️ Downloading *${title}*..._`);
+      const mp3Apis = [
+        async () => { const d = await fetchJson(`https://apiskeith.top/download/audio?url=${encodeURIComponent(link)}`); const u = d?.result; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+        async () => { const d = await fetchJson(`https://apis.xwolf.space/download/ytmp3?url=${encodeURIComponent(link)}`); const u = d?.downloadUrl || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+        async () => { const d = await fetchJson(`https://api.vreden.my.id/api/v1/download/youtube/audio?url=${encodeURIComponent(link)}&quality=128`); const u = d?.result?.download?.url || d?.data?.download?.url || d?.data?.url || d?.result?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+        async () => { const d = await fetchJson(`https://api.agatz.xyz/api/ytmp3?url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+        async () => { const d = await fetchJson(`https://api.siputzx.my.id/api/d/ytmp3?url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+        async () => { const d = await fetchJson(`https://api.dreaded.site/api/ytdl/audio?url=${encodeURIComponent(link)}`); const u = d?.result?.url || d?.data?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+        async () => { const d = await fetchJson(`https://api.ryzendesu.vip/api/downloader/ytmp3?url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+      ];
+      let downloadUrl = null;
+      for (const fn of mp3Apis) { try { downloadUrl = await fn(); if (downloadUrl) break; } catch (_) {} }
+      if (!downloadUrl) { await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } }); return reply('❌ All download servers failed. Try again later.'); }
+      await client.sendMessage(m.chat, {
+        audio: { url: downloadUrl },
+        mimetype: 'audio/mpeg',
+        fileName: `${title}.mp3`,
+        contextInfo: thumbnail ? { externalAdReply: { title, body: 'KING-M MUSIC', thumbnailUrl: thumbnail, sourceUrl: link, mediaType: 1, renderLargerThumbnail: true } } : undefined
+      }, { quoted: m });
+      await client.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
+    } catch (err) {
+      console.error('[PLAY] Error:', err.message);
+      await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
+      reply('❌ An error occurred. Please try again.');
     }
-
-try {
-     const search = await yts(text);
-     const video = search.videos[0];
-
-        if (!video) {
-          return client.sendMessage(from, {
-            text: 'No results found for your query.'
-          }, { quoted: m });
-        }
-        
-m.reply("_Please wait your download is in progress_");
-        
-        const safeTitle = video.title.replace(/[\\/:*?"<>|]/g, '');
-        const fileName = `${safeTitle}.mp3`;
-        const apiURL = `${BASE_URL}/dipto/ytDl3?link=${encodeURIComponent(video.videoId)}&format=mp3`;
-
-        const response = await axios.get(apiURL);
-        const data = response.data;
-
-        if (!data.downloadLink) {
-          return client.sendMessage(from, {
-            text: 'Failed to retrieve the MP3 download link.'
-          }, { quoted: m });
-        } 
-        
-        
-await client.sendMessage(from, {
-          audio: { url: data.downloadLink },
-          mimetype: 'audio/mpeg',
-          fileName
-        }, { quoted: m });
-
-      } catch (err) {
-        console.error('[PLAY] Error:', err);
-        await client.sendMessage(from, {
-          text: 'An error occurred while processing your request.'
-        }, { quoted: m });
-}
-}
-break;
+  }
+  break;
 
                         // ================== GET CHANNEL ID (JID) ==================
 case 'jid':
@@ -2539,48 +2531,43 @@ let options = []
 
 //========================================================================================================================//                  
         // Ensure you have this at the top: const yts = require('yt-search');
-case "song": {                
-    if (!text) {
-        return client.sendMessage(from, { text: 'Please provide a song name.' }, { quoted: m });
-    }
-
+case "song": {
+    if (!text) return reply(`⚠️ *Usage:* ${prefix}song <Song Name>`);
     try {
-        const search = await yts(text);
-        const video = search.videos[0];
-
-        if (!video) {
-            return client.sendMessage(from, {
-                text: 'No results found for your query.'
-            }, { quoted: m });
-        }
-
-        const safeTitle = video.title.replace(/[\\/:*?"<>|]/g, '');
-        const fileName = `${safeTitle}.mp3`;
-        const apiURL = `${BASE_URL}/dipto/ytDl3?link=${encodeURIComponent(video.videoId)}&format=mp3`;
-
-        const response = await axios.get(apiURL);
-        const data = response.data;
-
-        if (!data.downloadLink) {
-            return client.sendMessage(from, {
-                text: 'Failed to retrieve the MP3 download link.'
-            }, { quoted: m });
-        } 
-        
-        await client.sendMessage(from, {
-            document: { url: data.downloadLink },
-            mimetype: 'audio/mpeg',
-            fileName
-        }, { quoted: m });
-
+      await client.sendMessage(m.chat, { react: { text: '⏳', key: m.key } });
+      const search = await yts(text);
+      if (!search.all || !search.all.length) return reply('❌ No results found.');
+      const vid = search.all[0];
+      const link = vid.url;
+      const title = vid.title;
+      const thumbnail = vid.thumbnail || '';
+      m.reply(`_⬇️ Downloading *${title}* as document..._`);
+      const mp3Apis = [
+        async () => { const d = await fetchJson(`https://apiskeith.top/download/audio?url=${encodeURIComponent(link)}`); const u = d?.result; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+        async () => { const d = await fetchJson(`https://apis.xwolf.space/download/ytmp3?url=${encodeURIComponent(link)}`); const u = d?.downloadUrl || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+        async () => { const d = await fetchJson(`https://api.vreden.my.id/api/v1/download/youtube/audio?url=${encodeURIComponent(link)}&quality=128`); const u = d?.result?.download?.url || d?.data?.download?.url || d?.data?.url || d?.result?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+        async () => { const d = await fetchJson(`https://api.agatz.xyz/api/ytmp3?url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+        async () => { const d = await fetchJson(`https://api.siputzx.my.id/api/d/ytmp3?url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+        async () => { const d = await fetchJson(`https://api.dreaded.site/api/ytdl/audio?url=${encodeURIComponent(link)}`); const u = d?.result?.url || d?.data?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+        async () => { const d = await fetchJson(`https://api.ryzendesu.vip/api/downloader/ytmp3?url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+      ];
+      let downloadUrl = null;
+      for (const fn of mp3Apis) { try { downloadUrl = await fn(); if (downloadUrl) break; } catch (_) {} }
+      if (!downloadUrl) { await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } }); return reply('❌ All download servers failed. Try again later.'); }
+      await client.sendMessage(m.chat, {
+        document: { url: downloadUrl },
+        mimetype: 'audio/mpeg',
+        fileName: `${title}.mp3`,
+        contextInfo: thumbnail ? { externalAdReply: { title, body: 'KING-M MUSIC', thumbnailUrl: thumbnail, sourceUrl: link, mediaType: 1, renderLargerThumbnail: true } } : undefined
+      }, { quoted: m });
+      await client.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
     } catch (err) {
-        console.error('[PLAY] Error:', err);
-        await client.sendMessage(from, {
-            text: 'An error occurred while processing your request.'
-        }, { quoted: m });
+      console.error('[SONG] Error:', err.message);
+      await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
+      reply('❌ An error occurred. Please try again.');
     }
-}
-break;
+  }
+  break;
    
 
 //========================================================================================================================//                  
@@ -2611,10 +2598,11 @@ case 'play2': {
 
         // 2. API List (Your new one is first!)
         const apis = [
-            // YOUR NEW API (Vreden V1)
-            `https://api.vreden.my.id/api/v1/download/youtube/audio?url=${link}&quality=128`,
-            
+            // Priority APIs
+            `https://apiskeith.top/download/audio?url=${link}`,
+            `https://apis.xwolf.space/download/ytmp3?url=${link}`,
             // Backups
+            `https://api.vreden.my.id/api/v1/download/youtube/audio?url=${link}&quality=128`,
             `https://api.agatz.xyz/api/ytmp3?url=${link}`,
             `https://api.siputzx.my.id/api/d/ytmp3?url=${link}`,
             `https://api.widipe.com/download/ytdl?url=${link}`,
@@ -6661,6 +6649,16 @@ case "ytmp3": case "yta": {
         // 2. Try multiple download APIs (vreden is proven to work)
         let downloadUrl = null;
         const mp3Apis = [
+            async () => {
+                const d = await fetchJson(`https://apiskeith.top/download/audio?url=${encodeURIComponent(link)}`);
+                const u = d?.result;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+            async () => {
+                const d = await fetchJson(`https://apis.xwolf.space/download/ytmp3?url=${encodeURIComponent(link)}`);
+                const u = d?.downloadUrl || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
             async () => {
                 const d = await fetchJson(`https://api.vreden.my.id/api/v1/download/youtube/audio?url=${encodeURIComponent(link)}&quality=128`);
                 const u = d?.result?.download?.url || d?.data?.download?.url || d?.data?.url || d?.result?.url || d?.url;
