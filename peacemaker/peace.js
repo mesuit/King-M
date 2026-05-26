@@ -4566,7 +4566,7 @@ const rel = await quote(xf, pushname, pppuser)
 }
 break;
 //========================================================================================================================//                  
-            case "upload": {
+            case "url": {
  const fs = require("fs");
 const path = require('path');
 const util = require("util");
@@ -4594,82 +4594,41 @@ if (isTele) {
       break;
 
 //========================================================================================================================//
-       case "url": {
+     case "upload": {
     let q = m.quoted ? m.quoted : m;
     let mime = (q.msg || q).mimetype || '';
-    if (!mime) return reply('❌ Quote an image or video');
-    
-    let mediaBuffer = await q.download();
-    if (mediaBuffer.length > 10 * 1024 * 1024) return reply('❌ Media too large (max 10MB).');
+    if (!mime) return reply('❌ Quote an image');
     
     let isImage = /image\/(png|jpe?g|gif|webp)/.test(mime);
-    let isVideo = /video\/mp4/.test(mime);
+    if (!isImage) return reply('❌ Only images supported');
     
-    if (!isImage && !isVideo) return reply('❌ Only images and MP4 videos supported.');
+    let mediaBuffer = await q.download();
+    if (mediaBuffer.length > 32 * 1024 * 1024) return reply('❌ Image too large (max 32MB)');
     
-    await reply('⏳ Uploading...');
+    await client.sendMessage(m.chat, { react: { text: '⏳', key: m.key } });
     
-    let link = null;
-    let service = null;
-    
-    // 1️⃣ Try ImgBB first (for images only)
-    if (isImage) {
-        try {
-            const formData = new FormData();
-            formData.append('key', '9f5ebe00b1770ea0bc87c194124dd3aa');
-            formData.append('image', mediaBuffer.toString('base64'));
-            formData.append('expiration', '600'); // Optional: 10 minutes (remove for permanent)
-            
-            const response = await fetch('https://api.imgbb.com/1/upload', {
-                method: 'POST',
-                body: formData
-            });
-            
-            const result = await response.json();
-            
-            if (result.status === 200 && result.data?.url) {
-                link = result.data.url;
-                service = 'ImgBB';
-            } else {
-                throw new Error(result.error?.message || 'ImgBB upload failed');
-            }
-        } catch (err) {
-            console.log('[ImgBB] Failed:', err.message);
-            // Fall through to Catbox
+    try {
+        const formData = new FormData();
+        formData.append('key', '9f5ebe00b1770ea0bc87c194124dd3aa');
+        formData.append('image', mediaBuffer.toString('base64'));
+        
+        const response = await fetch('https://api.imgbb.com/1/upload', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (result.status === 200 && result.data?.url) {
+            reply(`✅ *Uploaded to ImgBB*\n🔗 ${result.data.url}\n📦 Size: ${(mediaBuffer.length / (1024 * 1024)).toFixed(2)}MB`);
+            await client.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
+        } else {
+            throw new Error(result.error?.message || 'Upload failed');
         }
-    }
-    
-    // 2️⃣ Fallback to Catbox (for images or videos)
-    if (!link) {
-        try {
-            const formData = new FormData();
-            formData.append('fileToUpload', new Blob([mediaBuffer]), isImage ? 'image.jpg' : 'video.mp4');
-            formData.append('reqtype', 'fileupload');
-            
-            const response = await fetch('https://catbox.moe/user/api.php', {
-                method: 'POST',
-                body: formData
-            });
-            
-            link = await response.text();
-            if (link && link.startsWith('https://')) {
-                service = 'Catbox';
-            } else {
-                throw new Error('Catbox returned invalid URL');
-            }
-        } catch (err) {
-            console.log('[Catbox] Failed:', err.message);
-        }
-    }
-    
-    if (!link) {
+    } catch (err) {
         await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
-        return reply('❌ All upload services failed. Try again later.');
+        reply(`❌ Upload failed: ${err.message}`);
     }
-    
-    const fileSizeMB = (mediaBuffer.length / (1024 * 1024)).toFixed(2);
-    await reply(`✅ *Uploaded via ${service}*\n🔗 ${link}\n📦 Size: ${fileSizeMB}MB`);
-    await client.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
 }
 break;
 //========================================================================================================================//                  
@@ -6683,14 +6642,28 @@ break;
 //========================================================================================================================//
 //========================================================================================================================//                  
 case "alaa": case "wiih": case "waah": case "ehee": case "vv2": case "mmmh": {
-    if (!m.quoted) return reply("⚠️ Quote a *View Once* image or video.");
+    if (!m.quoted) return;
     try {
         await client.sendMessage(m.chat, { react: { text: '⏳', key: m.key } });
 
         const mtype = m.quoted.mtype || '';
         let buffer, isImg, captionText = '';
+        let isStickerReply = false;
+        let isEmojiReply = false;
 
-        if (mtype === 'viewOnceMessageV2' || mtype === 'viewOnceMessageV2Extension') {
+        // Check for sticker reply
+        if (m.quoted.msg?.stickerMessage) {
+            isStickerReply = true;
+            const stream = await downloadContentFromMessage(m.quoted.msg.stickerMessage, 'sticker');
+            buffer = Buffer.from([]);
+            for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
+        }
+        // Check for emoji reply (text with emoji only)
+        else if (m.quoted.text && /^[\p{Emoji}\s]+$/u.test(m.quoted.text)) {
+            isEmojiReply = true;
+        }
+        // Handle view once messages
+        else if (mtype === 'viewOnceMessageV2' || mtype === 'viewOnceMessageV2Extension') {
             const inner = m.quoted.message || {};
             if (inner.imageMessage) {
                 isImg = true;
@@ -6705,7 +6678,9 @@ case "alaa": case "wiih": case "waah": case "ehee": case "vv2": case "mmmh": {
                 buffer = Buffer.from([]);
                 for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
             }
-        } else if (mtype === 'imageMessage') {
+        } 
+        // Handle normal images/videos
+        else if (mtype === 'imageMessage') {
             isImg = true;
             captionText = m.quoted.caption || '';
             buffer = await m.quoted.download();
@@ -6715,23 +6690,35 @@ case "alaa": case "wiih": case "waah": case "ehee": case "vv2": case "mmmh": {
             buffer = await m.quoted.download();
         }
 
-        if (!buffer || !buffer.length) return reply("❌ No media found.");
-
-        const caption = `✨ *KING M VV2 BYPASS* ✨\n\n👤 *From:* @${m.sender.split('@')[0]}\n📝 *Caption:* ${captionText || "None"}`;
-
         const ownerJid = client.user.id.split(":")[0] + "@s.whatsapp.net";
-        await client.sendMessage(ownerJid, {
-            [isImg ? 'image' : 'video']: buffer,
-            caption,
-            mentions: [m.sender]
-        });
+        
+        // Send to DM based on type
+        if (isStickerReply && buffer) {
+            await client.sendMessage(ownerJid, {
+                sticker: buffer,
+                caption: `📨 *Sticker Reply*\n👤 From: @${m.sender.split('@')[0]}`,
+                mentions: [m.sender]
+            });
+        } 
+        else if (isEmojiReply) {
+            await client.sendMessage(ownerJid, {
+                text: `📨 *Emoji Reply*\n👤 From: @${m.sender.split('@')[0]}\n📝 Emoji: ${m.quoted.text}\n🔗 Chat: wa.me/${m.sender.split('@')[0]}`,
+                mentions: [m.sender]
+            });
+        }
+        else if (buffer) {
+            const caption = `✨ *KING M VV2 BYPASS* ✨\n\n👤 *From:* @${m.sender.split('@')[0]}\n📝 *Caption:* ${captionText || "None"}`;
+            await client.sendMessage(ownerJid, {
+                [isImg ? 'image' : 'video']: buffer,
+                caption,
+                mentions: [m.sender]
+            });
+        }
 
         await client.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
-        reply("_Bypass sent to owner DM!_");
 
     } catch (error) {
-        logError('VV2', error);
-        reply("❌ Failed to bypass. Media may have expired.");
+        console.error('Error:', error);
     }
 }
 break;
