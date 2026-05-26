@@ -2385,43 +2385,114 @@ await client.sendMessage(
 break;
 
 //========================================================================================================================//                          
-  case "play": {
+ case "play": {
     if (!text) return reply(`⚠️ *Usage:* ${prefix}play <Song Name>`);
     try {
       await client.sendMessage(m.chat, { react: { text: '⏳', key: m.key } });
+      
+      // Search YouTube
       const search = await yts(text);
       if (!search.all || !search.all.length) return reply('❌ No results found.');
+      
       const vid = search.all[0];
       const link = vid.url;
       const title = vid.title;
       const thumbnail = vid.thumbnail || '';
-      m.reply(`_⬇️ Downloading *${title}*..._`);
-      const mp3Apis = [
-        async () => { const d = await fetchJson(`https://apiskeith.top/download/audio?url=${encodeURIComponent(link)}`); const u = d?.result; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
-        async () => { const d = await fetchJson(`https://apis.xwolf.space/download/ytmp3?url=${encodeURIComponent(link)}`); const u = d?.downloadUrl || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
-        async () => { const d = await fetchJson(`https://api.vreden.my.id/api/v1/download/youtube/audio?url=${encodeURIComponent(link)}&quality=128`); const u = d?.result?.download?.url || d?.data?.download?.url || d?.data?.url || d?.result?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
-        async () => { const d = await fetchJson(`https://api.agatz.xyz/api/ytmp3?url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
-        async () => { const d = await fetchJson(`https://api.siputzx.my.id/api/d/ytmp3?url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
-        async () => { const d = await fetchJson(`https://api.dreaded.site/api/ytdl/audio?url=${encodeURIComponent(link)}`); const u = d?.result?.url || d?.data?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
-        async () => { const d = await fetchJson(`https://api.ryzendesu.vip/api/downloader/ytmp3?url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
-      ];
-      let downloadUrl = null;
-      for (const fn of mp3Apis) { try { downloadUrl = await fn(); if (downloadUrl) break; } catch (_) {} }
-      if (!downloadUrl) { await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } }); return reply('❌ All download servers failed. Try again later.'); }
+      const duration = vid.timestamp || 'Unknown';
+      
+      await reply(`🎵 *${title}*\n⏱️ ${duration}\n🔄 Fetching audio...`);
+      
+      // ============ BK9.DEV MAIN + ITS BACKUP ENDPOINTS ============
+      const downloadUrl = await getAudioUrl(link);
+      
+      if (!downloadUrl) {
+        await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
+        return reply(`❌ *Failed to get audio*\n\nTry: ${prefix}ytmp3 ${text}`);
+      }
+      
+      // Send audio
       await client.sendMessage(m.chat, {
         audio: { url: downloadUrl },
         mimetype: 'audio/mpeg',
-        fileName: `${title}.mp3`,
-        contextInfo: thumbnail ? { externalAdReply: { title, body: 'KING-M MUSIC', thumbnailUrl: thumbnail, sourceUrl: link, mediaType: 1, renderLargerThumbnail: true } } : undefined
+        fileName: `${title.substring(0, 50)}.mp3`,
+        contextInfo: thumbnail ? { 
+          externalAdReply: { 
+            title: title.substring(0, 35), 
+            body: `🎵 KING-M MUSIC`, 
+            thumbnailUrl: thumbnail, 
+            sourceUrl: link, 
+            mediaType: 1, 
+            renderLargerThumbnail: true 
+          } 
+        } : undefined
       }, { quoted: m });
+      
       await client.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
+      reply(`✅ *Success!*\n🎵 ${title}\n📥 Downloaded`);
+      
     } catch (err) {
-      console.error('[PLAY] Error:', err.message);
+      console.error('[PLAY] Error:', err);
       await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
-      reply('❌ An error occurred. Please try again.');
+      reply(`❌ Error: ${err.message}`);
     }
   }
   break;
+
+// ============ HELPER FUNCTION FOR BK9 ENDPOINTS ============
+async function getAudioUrl(link) {
+  const endpoints = [
+    { name: "YouTube MP3", url: `https://api.bk9.dev/download/youtube?type=mp3&url=${encodeURIComponent(link)}` },
+    { name: "YouTube 02", url: `https://api.bk9.dev/download/YouTube%2002?url=${encodeURIComponent(link)}&type=mp3` },
+    { name: "YouTube 03", url: `https://api.bk9.dev/download/YouTube%2003?url=${encodeURIComponent(link)}` },
+    { name: "YouTube 04", url: `https://api.bk9.dev/download/YouTube%2004?url=${encodeURIComponent(link)}` },
+    { name: "YouTube 05", url: `https://api.bk9.dev/download/Youtube%2005?url=${encodeURIComponent(link)}&quality=128` },
+    { name: "YouTube 06", url: `https://api.bk9.dev/download/YouTube%2006?url=${encodeURIComponent(link)}` },
+    { name: "All In One", url: `https://api.bk9.dev/download/All%20In%20One%202?url=${encodeURIComponent(link)}` }
+  ];
+  
+  for (const endpoint of endpoints) {
+    try {
+      console.log(`[BK9] Trying: ${endpoint.name}`);
+      
+      const response = await fetchWithTimeout(endpoint.url, 10000);
+      const audioUrl = response?.data?.url || response?.result?.url || response?.download?.url || response?.url;
+      
+      if (audioUrl && audioUrl.startsWith('http')) {
+        console.log(`✅ BK9 ${endpoint.name} worked!`);
+        return audioUrl;
+      }
+    } catch (err) {
+      console.log(`❌ ${endpoint.name} failed:`, err.message);
+    }
+  }
+  
+  // Fallback to external API if all bk9 endpoints fail
+  try {
+    console.log('[BK9] All endpoints failed, trying fallback...');
+    const fallback = await fetchWithTimeout(`https://apis.xwolf.space/download/ytmp3?url=${encodeURIComponent(link)}`, 10000);
+    return fallback?.downloadUrl || fallback?.url || null;
+  } catch {
+    return null;
+  }
+}
+
+// Helper function with timeout
+async function fetchWithTimeout(url, timeout = 10000) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+  
+  try {
+    const res = await fetch(url, { 
+      signal: controller.signal,
+      headers: { 'User-Agent': 'Mozilla/5.0' }
+    });
+    clearTimeout(timeoutId);
+    return await res.json();
+  } catch (err) {
+    clearTimeout(timeoutId);
+    throw err;
+  }
+}
 
                         // ================== GET CHANNEL ID (JID) ==================
 case 'jid':
@@ -2654,24 +2725,38 @@ case "song": {
       const title = vid.title;
       const thumbnail = vid.thumbnail || '';
       m.reply(`_⬇️ Downloading *${title}* as document..._`);
+      
+      // BK9.DEV MAIN + ITS BACKUP ENDPOINTS
       const mp3Apis = [
-        async () => { const d = await fetchJson(`https://apiskeith.top/download/audio?url=${encodeURIComponent(link)}`); const u = d?.result; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+        // BK9 MAIN endpoints
+        async () => { const d = await fetchJson(`https://api.bk9.dev/download/youtube?type=mp3&url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.download?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+        async () => { const d = await fetchJson(`https://api.bk9.dev/download/YouTube%2002?url=${encodeURIComponent(link)}&type=mp3`); const u = d?.data?.url || d?.result?.url || d?.download?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+        async () => { const d = await fetchJson(`https://api.bk9.dev/download/YouTube%2003?url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.download?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+        async () => { const d = await fetchJson(`https://api.bk9.dev/download/YouTube%2004?url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.download?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+        async () => { const d = await fetchJson(`https://api.bk9.dev/download/Youtube%2005?url=${encodeURIComponent(link)}&quality=128`); const u = d?.data?.url || d?.result?.url || d?.download?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+        async () => { const d = await fetchJson(`https://api.bk9.dev/download/YouTube%2006?url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.download?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+        async () => { const d = await fetchJson(`https://api.bk9.dev/download/All%20In%20One%202?url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.download?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+        // External fallbacks
         async () => { const d = await fetchJson(`https://apis.xwolf.space/download/ytmp3?url=${encodeURIComponent(link)}`); const u = d?.downloadUrl || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
-        async () => { const d = await fetchJson(`https://api.vreden.my.id/api/v1/download/youtube/audio?url=${encodeURIComponent(link)}&quality=128`); const u = d?.result?.download?.url || d?.data?.download?.url || d?.data?.url || d?.result?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
-        async () => { const d = await fetchJson(`https://api.agatz.xyz/api/ytmp3?url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
         async () => { const d = await fetchJson(`https://api.siputzx.my.id/api/d/ytmp3?url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
-        async () => { const d = await fetchJson(`https://api.dreaded.site/api/ytdl/audio?url=${encodeURIComponent(link)}`); const u = d?.result?.url || d?.data?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
-        async () => { const d = await fetchJson(`https://api.ryzendesu.vip/api/downloader/ytmp3?url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+        async () => { const d = await fetchJson(`https://api.agatz.xyz/api/ytmp3?url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; }
       ];
+      
       let downloadUrl = null;
       for (const fn of mp3Apis) { try { downloadUrl = await fn(); if (downloadUrl) break; } catch (_) {} }
-      if (!downloadUrl) { await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } }); return reply('❌ All download servers failed. Try again later.'); }
+      
+      if (!downloadUrl) { 
+        await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } }); 
+        return reply('❌ All download servers failed. Try again later.'); 
+      }
+      
       await client.sendMessage(m.chat, {
         document: { url: downloadUrl },
         mimetype: 'audio/mpeg',
         fileName: `${title}.mp3`,
         contextInfo: thumbnail ? { externalAdReply: { title, body: 'KING-M MUSIC', thumbnailUrl: thumbnail, sourceUrl: link, mediaType: 1, renderLargerThumbnail: true } } : undefined
       }, { quoted: m });
+      
       await client.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
     } catch (err) {
       console.error('[SONG] Error:', err.message);
