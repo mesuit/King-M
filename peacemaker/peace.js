@@ -1217,23 +1217,23 @@ case 'offers': {
     // 1. DEFINE THE OFFERS CATALOG (From your website)
     const offers = {
         // DATA OFFERS
-        '55':  { type: 'data',    desc: '1.25GB (Midnight)' },
-        '50':  { type: 'data',    desc: '1.5GB (3 hours)' },
-        '250': { type: 'data',    desc: '1.2GB (30 days)' },
-        '49':  { type: 'data',    desc: '350MB (1 week)' },
-        '19':  { type: 'data',    desc: '1GB (1 hour)' },
-        '20':  { type: 'data',    desc: '250MB (24 hours)' },
-        '99':  { type: 'data',    desc: '1GB (24 hours)' },
-        '110': { type: 'data',    desc: '2GB (24 hours)' },
+        '55':  { type: 'data',    desc: '1.25GB (Midnight)', price: 55 },
+        '50':  { type: 'data',    desc: '1.5GB (3 hours)', price: 50 },
+        '250': { type: 'data',    desc: '1.2GB (30 days)', price: 250 },
+        '49':  { type: 'data',    desc: '350MB (1 week)', price: 49 },
+        '19':  { type: 'data',    desc: '1GB (1 hour)', price: 19 },
+        '20':  { type: 'data',    desc: '250MB (24 hours)', price: 20 },
+        '99':  { type: 'data',    desc: '1GB (24 hours)', price: 99 },
+        '110': { type: 'data',    desc: '2GB (24 hours)', price: 110 },
         // MINUTES OFFERS
-        '22':  { type: 'minutes', desc: '45 mins (3 hours)' },
-        '51':  { type: 'minutes', desc: '50 mins (Midnight)' },
+        '22':  { type: 'minutes', desc: '45 mins (3 hours)', price: 22 },
+        '51':  { type: 'minutes', desc: '50 mins (Midnight)', price: 51 },
         // SMS OFFERS
-        '10':  { type: 'sms',     desc: '200 SMS (24h)' },
-        '5':   { type: 'sms',     desc: '20 SMS (1 day)' },
-        '101': { type: 'sms',     desc: '1500 SMS (1 month)' },
-        '201': { type: 'sms',     desc: '3500 SMS (1 month)' },
-        '30':  { type: 'sms',     desc: '1000 SMS (7 days)' }
+        '10':  { type: 'sms',     desc: '200 SMS (24h)', price: 10 },
+        '5':   { type: 'sms',     desc: '20 SMS (1 day)', price: 5 },
+        '101': { type: 'sms',     desc: '1500 SMS (1 month)', price: 101 },
+        '201': { type: 'sms',     desc: '3500 SMS (1 month)', price: 201 },
+        '30':  { type: 'sms',     desc: '1000 SMS (7 days)', price: 30 }
     };
 
     // 2. HELP MENU (If no arguments)
@@ -1261,11 +1261,10 @@ case 'offers': {
         menu += `▪️ 1500 SMS (Month) - *101/=* (Cmd: ${prefix}buy 101)\n`;
         menu += `▪️ 3500 SMS (Month) - *201/=* (Cmd: ${prefix}buy 201)\n\n`;
 
-        menu += `_Reply with ${prefix}buy <amount> <phone> to purchase._`;
-        return client.sendMessage(m.chat, { 
-            image: { url: "https://files.catbox.moe/k86775.jpg" }, // Add a logo URL here if you want
-            caption: menu 
-        }, { quoted: m });
+        menu += `_Reply with ${prefix}buy <amount> <phone> to purchase._\n`;
+        menu += `_Example: ${prefix}buy 55 0712345678_`;
+        
+        return client.sendMessage(m.chat, { text: menu }, { quoted: m });
     }
 
     try {
@@ -1295,39 +1294,173 @@ case 'offers': {
             return reply("❌ Invalid Phone Number. Please use format: 0712345678");
         }
 
-        // 6. SEND REQUEST TO YOUR API
+        // 6. SEND REQUEST TO MAKAMESCO API
         await client.sendMessage(m.chat, { react: { text: '🔄', key: m.key } });
         
         const apiPayload = {
             phoneNumber: phone,
-            amount: amount,
-            description: selectedOffer.desc,
-            type: selectedOffer.type
+            amount: parseInt(selectedOffer.price),
+            accountReference: `BINGWA_${Date.now()}`,
+            transactionDesc: selectedOffer.desc
         };
 
-        const { data } = await axios.post("https://mpesa-stk.giftedtech.co.ke/api/payVictorN.php", apiPayload);
+        const { data } = await axios.post("https://pay.makamesco-tech.co.ke/api/payments/stkpush", apiPayload, {
+            headers: {
+                'Content-Type': 'application/json',
+                'X-API-Key': 'sk_321460063d3e6092d78a6ffd419ebe6124e0d6f16605c7f0f0af4012be712546'
+            }
+        });
 
         // 7. HANDLE RESPONSE
-        if (data && data.success) {
+        if (data && (data.responseCode === "0" || data.checkoutRequestId)) {
+            const checkoutId = data.checkoutRequestId;
+            
+            // Send initial success message
             await client.sendMessage(m.chat, { 
                 text: `✅ *STK PUSH SENT!*\n\n` +
                       `📦 *Offer:* ${selectedOffer.desc}\n` +
                       `💰 *Price:* Ksh ${amount}\n` +
                       `📱 *Phone:* ${phone}\n\n` +
-                      `_Please check your phone and enter your M-Pesa PIN to complete the purchase._`
+                      `_Please check your phone and enter your M-Pesa PIN to complete the purchase._\n\n` +
+                      `⏱️ *Waiting for payment confirmation...*`
             }, { quoted: m });
             
-            await client.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
-
-            // (Optional) Poll for status here if you want, but strictly not necessary for the user to just buy.
+            await client.sendMessage(m.chat, { react: { text: '⏳', key: m.key } });
+            
+            // 8. START POLLING FOR TRANSACTION STATUS
+            let attempts = 0;
+            const maxAttempts = 20; // 60 seconds (3s interval)
+            let statusChecked = false;
+            
+            const pollInterval = setInterval(async () => {
+                attempts++;
+                
+                try {
+                    const statusUrl = `https://pay.makamesco-tech.co.ke/api/payments/status/${checkoutId}`;
+                    const { data: statusData } = await axios.get(statusUrl, {
+                        headers: { 'X-API-Key': 'sk_321460063d3e6092d78a6ffd419ebe6124e0d6f16605c7f0f0af4012be712546' }
+                    });
+                    
+                    console.log(`Poll attempt ${attempts}:`, statusData);
+                    
+                    // Check if payment completed
+                    if (statusData.status === 'completed' || statusData.responseCode === '0' || 
+                        statusData.data?.status === 'success' || statusData.ResultCode === '0') {
+                        
+                        if (!statusChecked) {
+                            statusChecked = true;
+                            clearInterval(pollInterval);
+                            
+                            await client.sendMessage(m.chat, { 
+                                text: `🎉 *PAYMENT SUCCESSFUL!*\n\n` +
+                                      `✅ Your *${selectedOffer.desc}* bundle has been delivered successfully!\n` +
+                                      `💰 *Amount:* Ksh ${amount}\n` +
+                                      `📱 *Phone:* ${phone}\n` +
+                                      `📦 *Transaction ID:* ${checkoutId.slice(-8)}\n\n` +
+                                      `_Thank you for choosing Victor Bingwa Sokoni!_`
+                            });
+                            await client.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
+                        }
+                        
+                    } 
+                    // Check if payment failed
+                    else if (statusData.status === 'failed' || statusData.responseCode === '1' || 
+                             statusData.ResultCode === '1037' || statusData.ResultCode === '1') {
+                        
+                        if (!statusChecked) {
+                            statusChecked = true;
+                            clearInterval(pollInterval);
+                            
+                            let failReason = statusData.ResultDesc || statusData.message || 'Transaction cancelled or insufficient funds';
+                            if (statusData.ResultCode === '1037') failReason = 'Transaction cancelled by user';
+                            if (statusData.ResultCode === '1') failReason = 'Insufficient funds or invalid PIN';
+                            
+                            await client.sendMessage(m.chat, { 
+                                text: `❌ *PAYMENT FAILED*\n\n` +
+                                      `Sorry, your payment for *${selectedOffer.desc}* was not completed.\n` +
+                                      `📱 *Phone:* ${phone}\n` +
+                                      `💰 *Amount:* Ksh ${amount}\n` +
+                                      `⚠️ *Reason:* ${failReason}\n\n` +
+                                      `Please try again with *${prefix}buy ${amount}*`
+                            });
+                            await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
+                        }
+                        
+                    } 
+                    // Timeout after max attempts
+                    else if (attempts >= maxAttempts && !statusChecked) {
+                        statusChecked = true;
+                        clearInterval(pollInterval);
+                        
+                        await client.sendMessage(m.chat, { 
+                            text: `⏳ *PAYMENT PENDING*\n\n` +
+                                  `We haven't received confirmation for your *${selectedOffer.desc}* purchase.\n` +
+                                  `📱 *Phone:* ${phone}\n` +
+                                  `💰 *Amount:* Ksh ${amount}\n\n` +
+                                  `_Please check your M-Pesa messages. The bundle will be delivered once payment is confirmed._\n\n` +
+                                  `📦 *Transaction ID:* ${checkoutId.slice(-8)}`
+                        });
+                        await client.sendMessage(m.chat, { react: { text: '⚠️', key: m.key } });
+                    }
+                    
+                } catch (pollError) {
+                    console.log('Poll error (normal if still processing):', pollError.message);
+                    
+                    if (attempts >= maxAttempts && !statusChecked) {
+                        statusChecked = true;
+                        clearInterval(pollInterval);
+                        
+                        await client.sendMessage(m.chat, { 
+                            text: `⏳ *PAYMENT PENDING*\n\n` +
+                                  `We are still waiting for confirmation of your *${selectedOffer.desc}* purchase.\n` +
+                                  `📱 *Phone:* ${phone}\n` +
+                                  `💰 *Amount:* Ksh ${amount}\n\n` +
+                                  `_Please check your M-Pesa messages. The bundle will be delivered once payment is confirmed._`
+                        });
+                    }
+                }
+            }, 3000);
+            
+            // Optional: Stop polling after 2 minutes as safety
+            setTimeout(() => {
+                if (!statusChecked) {
+                    clearInterval(pollInterval);
+                    if (!statusChecked) {
+                        statusChecked = true;
+                        client.sendMessage(m.chat, { 
+                            text: `⏳ *PAYMENT STATUS CHECK TIMEOUT*\n\n` +
+                                  `Please check your M-Pesa messages for confirmation.\n` +
+                                  `The bundle will be delivered once payment is confirmed.`
+                        });
+                    }
+                }
+            }, 65000); // 65 seconds max
 
         } else {
-            reply(`❌ *Transaction Failed*\nReason: ${data.error || "Unknown Error from Server"}`);
+            const errorMsg = data?.message || data?.error || "Unknown Error from Server";
+            await reply(`❌ *STK Push Failed*\nReason: ${errorMsg}`);
+            await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
         }
 
     } catch (e) {
         logError('Bingwa Sokoni ', e);
-        reply("❌ *System Error*\nCould not connect to the payment server. Try again later.");
+        
+        let errorMessage = "❌ *System Error*\nCould not connect to the payment server. Try again later.";
+        
+        if (e.response) {
+            if (e.response.status === 401) {
+                errorMessage = "❌ *Authentication Error*\nPayment system configuration issue. Contact support.";
+            } else if (e.response.status === 400) {
+                errorMessage = `❌ *Bad Request*\n${e.response.data?.message || 'Invalid payment details'}`;
+            } else {
+                errorMessage = `❌ *Server Error*\nStatus: ${e.response.status}\nPlease try again later.`;
+            }
+        } else if (e.request) {
+            errorMessage = "❌ *Network Error*\nUnable to reach payment server. Check your internet connection.";
+        }
+        
+        await reply(errorMessage);
+        await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
     }
 }
 break;
