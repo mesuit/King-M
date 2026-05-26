@@ -4594,44 +4594,84 @@ if (isTele) {
       break;
 
 //========================================================================================================================//
-        case "url": {
- const fs = require("fs");
-const path = require('path');
-const util = require("util");
-
-let q = m.quoted ? m.quoted : m
-let mime = (q.msg || q).mimetype || ''
-if (!mime) return m.reply('Quote an image or video')
-let mediaBuffer = await q.download()
-
-  if (mediaBuffer.length > 10 * 1024 * 1024) return m.reply('Media is too large.')
-let isTele = /image\/(png|jpe?g|gif)|video\/mp4/.test(mime)
-
-if (isTele) {
-    let fta2 = await _downloadAndSave(client, q)
-    let link = await uploadToCatbox(fta2)
-
-    const fileSizeMB = (mediaBuffer.length / (1024 * 1024)).toFixed(2)
-    m.reply(`Media Link:\n\n${link}`)
-  } else {
-    m.reply(`Error occured...`)
-  }
+       case "url": {
+    let q = m.quoted ? m.quoted : m;
+    let mime = (q.msg || q).mimetype || '';
+    if (!mime) return reply('❌ Quote an image or video');
+    
+    let mediaBuffer = await q.download();
+    if (mediaBuffer.length > 10 * 1024 * 1024) return reply('❌ Media too large (max 10MB).');
+    
+    let isImage = /image\/(png|jpe?g|gif|webp)/.test(mime);
+    let isVideo = /video\/mp4/.test(mime);
+    
+    if (!isImage && !isVideo) return reply('❌ Only images and MP4 videos supported.');
+    
+    await reply('⏳ Uploading...');
+    
+    let link = null;
+    let service = null;
+    
+    // 1️⃣ Try ImgBB first (for images only)
+    if (isImage) {
+        try {
+            const formData = new FormData();
+            formData.append('key', '9f5ebe00b1770ea0bc87c194124dd3aa');
+            formData.append('image', mediaBuffer.toString('base64'));
+            formData.append('expiration', '600'); // Optional: 10 minutes (remove for permanent)
+            
+            const response = await fetch('https://api.imgbb.com/1/upload', {
+                method: 'POST',
+                body: formData
+            });
+            
+            const result = await response.json();
+            
+            if (result.status === 200 && result.data?.url) {
+                link = result.data.url;
+                service = 'ImgBB';
+            } else {
+                throw new Error(result.error?.message || 'ImgBB upload failed');
+            }
+        } catch (err) {
+            console.log('[ImgBB] Failed:', err.message);
+            // Fall through to Catbox
+        }
     }
-      break;
-                      
-//========================================================================================================================//                  
-     case 'attp':
-                if (!q) return reply('I need text;')
-              
-                client.sendMessage(m.chat, {
-                    sticker: {
-                        url: `https://api.lolhuman.xyz/api/attp?apikey=cde5404984da80591a2692b6&text=${q}`
-                    }
-                }, {
-                    quoted: m
-                })
-                break;
-
+    
+    // 2️⃣ Fallback to Catbox (for images or videos)
+    if (!link) {
+        try {
+            const formData = new FormData();
+            formData.append('fileToUpload', new Blob([mediaBuffer]), isImage ? 'image.jpg' : 'video.mp4');
+            formData.append('reqtype', 'fileupload');
+            
+            const response = await fetch('https://catbox.moe/user/api.php', {
+                method: 'POST',
+                body: formData
+            });
+            
+            link = await response.text();
+            if (link && link.startsWith('https://')) {
+                service = 'Catbox';
+            } else {
+                throw new Error('Catbox returned invalid URL');
+            }
+        } catch (err) {
+            console.log('[Catbox] Failed:', err.message);
+        }
+    }
+    
+    if (!link) {
+        await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
+        return reply('❌ All upload services failed. Try again later.');
+    }
+    
+    const fileSizeMB = (mediaBuffer.length / (1024 * 1024)).toFixed(2);
+    await reply(`✅ *Uploaded via ${service}*\n🔗 ${link}\n📦 Size: ${fileSizeMB}MB`);
+    await client.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
+}
+break;
 //========================================================================================================================//                  
     case 'smeme': {
                 let responnd = `Quote an image or sticker with the 2 texts separated with |`
