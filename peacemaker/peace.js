@@ -1176,7 +1176,8 @@ case 'reactset': {
         // 1. FIX: Manually check Owner permissions inside the command
         // This fixes "isCreator is not defined" because we define it right here.
         const { owner } = require('../set'); // Load owner list from set.js
-        const senderNum = m.sender.split('@')[0];
+        // Strip Baileys v7 device suffix (e.g. "254786235426:15" → "254786235426")
+        const senderNum = m.sender.split('@')[0].split(':')[0];
         const botNum = client.user.id.split(':')[0];
         
         // true if sender is in owner list OR sender is the bot itself
@@ -1214,232 +1215,120 @@ break;
 case 'buy':
 case 'buydata':
 case 'offers': {
-    // 1. DEFINE THE OFFERS CATALOG
+    // 1. DEFINE THE OFFERS CATALOG (From your website)
     const offers = {
-        '55':  { type: 'data',    desc: '1.25GB (Midnight)', price: 55 },
-        '50':  { type: 'data',    desc: '1.5GB (3 hours)', price: 50 },
-        '250': { type: 'data',    desc: '1.2GB (30 days)', price: 250 },
-        '49':  { type: 'data',    desc: '350MB (1 week)', price: 49 },
-        '19':  { type: 'data',    desc: '1GB (1 hour)', price: 19 },
-        '20':  { type: 'data',    desc: '250MB (24 hours)', price: 20 },
-        '99':  { type: 'data',    desc: '1GB (24 hours)', price: 99 },
-        '110': { type: 'data',    desc: '2GB (24 hours)', price: 110 },
-        '22':  { type: 'minutes', desc: '45 mins (3 hours)', price: 22 },
-        '51':  { type: 'minutes', desc: '50 mins (Midnight)', price: 51 },
-        '10':  { type: 'sms',     desc: '200 SMS (24h)', price: 10 },
-        '5':   { type: 'sms',     desc: '20 SMS (1 day)', price: 5 },
-        '101': { type: 'sms',     desc: '1500 SMS (1 month)', price: 101 },
-        '201': { type: 'sms',     desc: '3500 SMS (1 month)', price: 201 },
-        '30':  { type: 'sms',     desc: '1000 SMS (7 days)', price: 30 }
+        // DATA OFFERS
+        '55':  { type: 'data',    desc: '1.25GB (Midnight)' },
+        '50':  { type: 'data',    desc: '1.5GB (3 hours)' },
+        '250': { type: 'data',    desc: '1.2GB (30 days)' },
+        '49':  { type: 'data',    desc: '350MB (1 week)' },
+        '19':  { type: 'data',    desc: '1GB (1 hour)' },
+        '20':  { type: 'data',    desc: '250MB (24 hours)' },
+        '99':  { type: 'data',    desc: '1GB (24 hours)' },
+        '110': { type: 'data',    desc: '2GB (24 hours)' },
+        // MINUTES OFFERS
+        '22':  { type: 'minutes', desc: '45 mins (3 hours)' },
+        '51':  { type: 'minutes', desc: '50 mins (Midnight)' },
+        // SMS OFFERS
+        '10':  { type: 'sms',     desc: '200 SMS (24h)' },
+        '5':   { type: 'sms',     desc: '20 SMS (1 day)' },
+        '101': { type: 'sms',     desc: '1500 SMS (1 month)' },
+        '201': { type: 'sms',     desc: '3500 SMS (1 month)' },
+        '30':  { type: 'sms',     desc: '1000 SMS (7 days)' }
     };
 
-    // HELP MENU
+    // 2. HELP MENU (If no arguments)
     if (!text) {
-        let menu = `🛒 *VICTOR BINGWA SOKONI*\n_Premium Data, Minutes & SMS_\n\n` +
-                   `*📡 DATA BUNDLES*\n` +
-                   `▪️ 1.25GB (Midnight) - *55/=*\n▪️ 1.5GB (3 hours) - *50/=*\n▪️ 1GB (1 hour) - *19/=*\n` +
-                   `▪️ 250MB (24h) - *20/=*\n▪️ 1GB (24h) - *99/=*\n▪️ 2GB (24h) - *110/=*\n` +
-                   `▪️ 350MB (7 days) - *49/=*\n▪️ 1.2GB (30 days) - *250/=*\n\n` +
-                   `*📞 MINUTES*\n▪️ 45 Mins (3hrs) - *22/=*\n▪️ 50 Mins (Midnight) - *51/=*\n\n` +
-                   `*💬 SMS BUNDLES*\n▪️ 20 SMS (1 Day) - *5/=*\n▪️ 200 SMS (24h) - *10/=*\n` +
-                   `▪️ 1000 SMS (7 Days) - *30/=*\n▪️ 1500 SMS (Month) - *101/=*\n▪️ 3500 SMS (Month) - *201/=*\n\n` +
-                   `_Example: ${prefix}buy 55 0712345678_`;
-        return client.sendMessage(m.chat, { text: menu }, { quoted: m });
+        let menu = `🛒 *VICTOR BINGWA SOKONI*\n_Premium Data, Minutes & SMS_\n\n`;
+        
+        menu += `*📡 DATA BUNDLES*\n`;
+        menu += `▪️ 1.25GB (Midnight) - *55/=* (Cmd: ${prefix}buy 55)\n`;
+        menu += `▪️ 1.5GB (3 hours) - *50/=* (Cmd: ${prefix}buy 50)\n`;
+        menu += `▪️ 1GB (1 hour) - *19/=* (Cmd: ${prefix}buy 19)\n`;
+        menu += `▪️ 250MB (24h) - *20/=* (Cmd: ${prefix}buy 20)\n`;
+        menu += `▪️ 1GB (24h) - *99/=* (Cmd: ${prefix}buy 99)\n`;
+        menu += `▪️ 2GB (24h) - *110/=* (Cmd: ${prefix}buy 110)\n`;
+        menu += `▪️ 350MB (7 days) - *49/=* (Cmd: ${prefix}buy 49)\n`;
+        menu += `▪️ 1.2GB (30 days) - *250/=* (Cmd: ${prefix}buy 250)\n\n`;
+
+        menu += `*📞 MINUTES*\n`;
+        menu += `▪️ 45 Mins (3hrs) - *22/=* (Cmd: ${prefix}buy 22)\n`;
+        menu += `▪️ 50 Mins (Midnight) - *51/=* (Cmd: ${prefix}buy 51)\n\n`;
+
+        menu += `*💬 SMS BUNDLES*\n`;
+        menu += `▪️ 20 SMS (1 Day) - *5/=* (Cmd: ${prefix}buy 5)\n`;
+        menu += `▪️ 200 SMS (24h) - *10/=* (Cmd: ${prefix}buy 10)\n`;
+        menu += `▪️ 1000 SMS (7 Days) - *30/=* (Cmd: ${prefix}buy 30)\n`;
+        menu += `▪️ 1500 SMS (Month) - *101/=* (Cmd: ${prefix}buy 101)\n`;
+        menu += `▪️ 3500 SMS (Month) - *201/=* (Cmd: ${prefix}buy 201)\n\n`;
+
+        menu += `_Reply with ${prefix}buy <amount> <phone> to purchase._`;
+        return client.sendMessage(m.chat, { 
+            image: { url: "https://files.catbox.moe/k86775.jpg" }, // Add a logo URL here if you want
+            caption: menu 
+        }, { quoted: m });
     }
 
     try {
+        // 3. PARSE INPUT (.buy 50 0712345678)
         let argsList = text.split(" ");
         let amount = argsList[0];
         let phoneInput = argsList[1];
 
+        // 4. FIND THE OFFER
         const selectedOffer = offers[amount];
+
         if (!selectedOffer) {
-            return reply(`❌ Invalid amount! Type *${prefix}offers* to see prices.`);
+            return reply(`❌ *Invalid Amount!*\nWe don't have an offer for Ksh ${amount}.\nType *${prefix}offers* to see the price list.`);
         }
 
+        // 5. VALIDATE PHONE NUMBER
         if (!phoneInput) {
-            return reply(`⚠️ Usage: *${prefix}buy ${amount} 0712345678*`);
+            return reply(`⚠️ Please provide a phone number!\nUsage: *${prefix}buy ${amount} 0712345678*`);
         }
 
+        // Format to 254...
         let phone = phoneInput.replace(/[^0-9]/g, '');
         if (phone.startsWith('0')) phone = '254' + phone.substring(1);
         if (phone.startsWith('7') || phone.startsWith('1')) phone = '254' + phone;
 
         if (!phone.startsWith('254') || phone.length !== 12) {
-            return reply("❌ Invalid phone number. Use 0712345678");
+            return reply("❌ Invalid Phone Number. Please use format: 0712345678");
         }
 
+        // 6. SEND REQUEST TO YOUR API
         await client.sendMessage(m.chat, { react: { text: '🔄', key: m.key } });
         
-        // ========== TRY MAKAMESCO API FIRST ==========
-        let paymentSuccess = false;
-        let checkoutId = null;
-        
-        try {
-            const apiPayload = {
-                phoneNumber: phone,
-                amount: parseInt(selectedOffer.price),
-                accountReference: `BINGWA_${Date.now()}`,
-                transactionDesc: selectedOffer.desc
-            };
+        const apiPayload = {
+            phoneNumber: phone,
+            amount: amount,
+            description: selectedOffer.desc,
+            type: selectedOffer.type
+        };
 
-            console.log('Trying MakameSco API:', apiPayload);
-            
-            const { data } = await axios.post("https://pay.makamesco-tech.co.ke/api/payments/stkpush", apiPayload, {
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-API-Key': 'sk_321460063d3e6092d78a6ffd419ebe6124e0d6f16605c7f0f0af4012be712546'
-                },
-                timeout: 30000 // 30 second timeout
-            });
+        const { data } = await axios.post("https://mpesa-stk.giftedtech.co.ke/api/payVictorN.php", apiPayload);
 
-            console.log('MakameSco Response:', data);
-            
-            if (data && (data.responseCode === "0" || data.checkoutRequestId)) {
-                paymentSuccess = true;
-                checkoutId = data.checkoutRequestId;
-            } else {
-                throw new Error(data?.message || 'STK push failed');
-            }
-            
-        } catch (makameScoError) {
-            console.log('MakameSco failed, trying alternative endpoint:', makameScoError.message);
-            
-            // ========== FALLBACK: Use the working payment link ==========
-            try {
-                // Option 1: Send the payment link directly
-                const paymentLink = `https://pay.makamesco-tech.co.ke/pay/YjsxGecgIX?phone=${phone}&amount=${selectedOffer.price}&description=${encodeURIComponent(selectedOffer.desc)}`;
-                
-                await client.sendMessage(m.chat, { 
-                    text: `🔗 *COMPLETE PAYMENT VIA LINK*\n\n` +
-                          `📦 *Offer:* ${selectedOffer.desc}\n` +
-                          `💰 *Amount:* Ksh ${selectedOffer.price}\n` +
-                          `📱 *Phone:* ${phone}\n\n` +
-                          `Click the link below to complete payment:\n${paymentLink}\n\n` +
-                          `_You will receive an STK push on your phone._`
-                }, { quoted: m });
-                
-                await client.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
-                return;
-                
-            } catch (fallbackError) {
-                throw new Error('Both payment methods failed');
-            }
-        }
-        
-        // ========== HANDLE SUCCESSFUL STK PUSH ==========
-        if (paymentSuccess && checkoutId) {
+        // 7. HANDLE RESPONSE
+        if (data && data.success) {
             await client.sendMessage(m.chat, { 
                 text: `✅ *STK PUSH SENT!*\n\n` +
                       `📦 *Offer:* ${selectedOffer.desc}\n` +
-                      `💰 *Price:* Ksh ${selectedOffer.price}\n` +
+                      `💰 *Price:* Ksh ${amount}\n` +
                       `📱 *Phone:* ${phone}\n\n` +
-                      `_Please check your phone and enter your M-Pesa PIN._\n` +
-                      `⏱️ *Waiting for confirmation...*`
+                      `_Please check your phone and enter your M-Pesa PIN to complete the purchase._`
             }, { quoted: m });
             
-            // ========== POLL FOR STATUS ==========
-            let attempts = 0;
-            const maxAttempts = 20;
-            let completed = false;
-            
-            const pollInterval = setInterval(async () => {
-                attempts++;
-                if (completed) return;
-                
-                try {
-                    const statusUrl = `https://pay.makamesco-tech.co.ke/api/payments/status/${checkoutId}`;
-                    const { data: statusData } = await axios.get(statusUrl, {
-                        headers: { 'X-API-Key': 'sk_321460063d3e6092d78a6ffd419ebe6124e0d6f16605c7f0f0af4012be712546' },
-                        timeout: 10000
-                    });
-                    
-                    if (statusData.status === 'completed' || statusData.responseCode === '0' || 
-                        statusData.ResultCode === '0') {
-                        
-                        completed = true;
-                        clearInterval(pollInterval);
-                        
-                        await client.sendMessage(m.chat, { 
-                            text: `🎉 *PAYMENT SUCCESSFUL!*\n\n` +
-                                  `✅ Your *${selectedOffer.desc}* has been delivered!\n` +
-                                  `💰 *Amount:* Ksh ${selectedOffer.price}\n` +
-                                  `📱 *Phone:* ${phone}\n\n` +
-                                  `_Thank you for choosing Victor Bingwa Sokoni!_`
-                        });
-                        await client.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
-                        
-                    } else if (statusData.status === 'failed' || statusData.ResultCode === '1037' || statusData.ResultCode === '1') {
-                        
-                        completed = true;
-                        clearInterval(pollInterval);
-                        
-                        let reason = statusData.ResultDesc || 'Transaction failed';
-                        if (statusData.ResultCode === '1037') reason = 'Transaction cancelled by user';
-                        if (statusData.ResultCode === '1') reason = 'Insufficient funds or wrong PIN';
-                        
-                        await client.sendMessage(m.chat, { 
-                            text: `❌ *PAYMENT FAILED*\n\n` +
-                                  `Reason: ${reason}\n` +
-                                  `Please try again with *${prefix}buy ${amount}*`
-                        });
-                        await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
-                    }
-                    
-                } catch (err) {
-                    if (attempts >= maxAttempts && !completed) {
-                        clearInterval(pollInterval);
-                        await client.sendMessage(m.chat, { 
-                            text: `⏳ *PAYMENT PENDING*\n\n` +
-                                  `Please check your M-Pesa messages.\n` +
-                                  `The bundle will be delivered once payment is confirmed.`
-                        });
-                    }
-                }
-            }, 3000);
-            
-            // Stop polling after 60 seconds
-            setTimeout(() => {
-                if (!completed) {
-                    clearInterval(pollInterval);
-                }
-            }, 65000);
+            await client.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
+
+            // (Optional) Poll for status here if you want, but strictly not necessary for the user to just buy.
+
+        } else {
+            reply(`❌ *Transaction Failed*\nReason: ${data.error || "Unknown Error from Server"}`);
         }
-        
+
     } catch (e) {
-        console.error('Bingwa Sokoni Error:', e);
-        
-        // FALLBACK: Send payment link directly
-        try {
-            let argsList = text.split(" ");
-            let amount = argsList[0];
-            let phoneInput = argsList[1];
-            
-            let phone = phoneInput?.replace(/[^0-9]/g, '');
-            if (phone?.startsWith('0')) phone = '254' + phone.substring(1);
-            if (phone?.startsWith('7') || phone?.startsWith('1')) phone = '254' + phone;
-            
-            const selectedOffer = offers[amount];
-            
-            if (selectedOffer && phone) {
-                const paymentLink = `https://pay.makamesco-tech.co.ke/pay/YjsxGecgIX?phone=${phone}&amount=${selectedOffer.price}&description=${encodeURIComponent(selectedOffer.desc)}`;
-                
-                await client.sendMessage(m.chat, { 
-                    text: `🔗 *PAYMENT LINK GENERATED*\n\n` +
-                          `📦 *Offer:* ${selectedOffer.desc}\n` +
-                          `💰 *Amount:* Ksh ${selectedOffer.price}\n` +
-                          `📱 *Phone:* ${phone}\n\n` +
-                          `Click to pay: ${paymentLink}\n\n` +
-                          `_Open the link and follow instructions to complete payment._`
-                }, { quoted: m });
-                return;
-            }
-        } catch (fallbackErr) {
-            console.error('Fallback also failed:', fallbackErr);
-        }
-        
-        await reply("❌ *Payment server is busy*\nPlease try again in a few minutes or contact support: 0743272507");
-        await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
+        logError('Bingwa Sokoni ', e);
+        reply("❌ *System Error*\nCould not connect to the payment server. Try again later.");
     }
 }
 break;
@@ -2385,7 +2274,7 @@ await client.sendMessage(
 break;
 
 //========================================================================================================================//                          
- case "play": {
+  case "play": {
     if (!text) return reply(`⚠️ *Usage:* ${prefix}play <Song Name>`);
     try {
       await client.sendMessage(m.chat, { react: { text: '⏳', key: m.key } });
@@ -2395,43 +2284,35 @@ break;
       const link = vid.url;
       const title = vid.title;
       const thumbnail = vid.thumbnail || '';
-      
-      // BK9 MAIN + backup endpoints
-      const mp3Apis = [
-        async () => { const d = await fetchJson(`https://api.bk9.dev/download/youtube?type=mp3&url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.download?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
-        async () => { const d = await fetchJson(`https://api.bk9.dev/download/YouTube%2002?url=${encodeURIComponent(link)}&type=mp3`); const u = d?.data?.url || d?.result?.url || d?.download?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
-        async () => { const d = await fetchJson(`https://api.bk9.dev/download/YouTube%2003?url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.download?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
-        async () => { const d = await fetchJson(`https://api.bk9.dev/download/YouTube%2004?url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.download?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
-        async () => { const d = await fetchJson(`https://api.bk9.dev/download/Youtube%2005?url=${encodeURIComponent(link)}&quality=128`); const u = d?.data?.url || d?.result?.url || d?.download?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
-        async () => { const d = await fetchJson(`https://api.bk9.dev/download/YouTube%2006?url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.download?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
-        async () => { const d = await fetchJson(`https://api.bk9.dev/download/All%20In%20One%202?url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.download?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
-        async () => { const d = await fetchJson(`https://apis.xwolf.space/download/ytmp3?url=${encodeURIComponent(link)}`); const u = d?.downloadUrl || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; }
-      ];
-      
+      m.reply(`_⬇️ Downloading *${title}*..._`);
       let downloadUrl = null;
-      for (const fn of mp3Apis) { try { downloadUrl = await fn(); if (downloadUrl) break; } catch (_) {} }
-      
-      if (!downloadUrl) {
-        await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
-        return reply('❌ Failed to download. Try again.');
-      }
-      
-      // Send audio directly - NO extra messages
+      const _playApis = [
+        async () => { const d = await fetchJson(`https://apiskeith2-production-2ecd.up.railway.app/download/audio?url=${encodeURIComponent(link)}`); const u = d?.result; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+        async () => { const d = await fetchJson(`https://api.bk9.dev/download/ytmp3?url=${encodeURIComponent(link)}`); const u = d?.BK9?.downloadUrl || d?.downloadUrl; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+        async () => { try { const i = await ytdl.getInfo(link, { requestOptions: { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' } } }); const f = ytdl.chooseFormat(i.formats, { filter: 'audioonly', quality: 'highestaudio' }); return f?.url || null; } catch (_) { return null; } },
+        async () => { const d = await fetchJson(`https://api.ryzendesu.vip/api/downloader/ytmp3?url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+        async () => { const d = await fetchJson(`https://api.siputzx.my.id/api/d/ytmp3?url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+        async () => { const d = await fetchJson(`https://api.dreaded.site/api/ytdl/audio?url=${encodeURIComponent(link)}`); const u = d?.result?.url || d?.data?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+        async () => { const d = await fetchJson(`https://api.vreden.my.id/api/v1/download/youtube/audio?url=${encodeURIComponent(link)}&quality=128`); const u = d?.result?.download?.url || d?.data?.url || d?.result?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+        async () => { const d = await fetchJson(`https://api.agatz.xyz/api/ytmp3?url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+      ];
+      for (const fn of _playApis) { try { downloadUrl = await fn(); if (downloadUrl) break; } catch (_) {} }
+      if (!downloadUrl) { await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } }); return reply('❌ All download servers failed. Try again later.'); }
       await client.sendMessage(m.chat, {
         audio: { url: downloadUrl },
         mimetype: 'audio/mpeg',
         fileName: `${title}.mp3`,
-        contextInfo: thumbnail ? { externalAdReply: { title: title.substring(0, 35), body: 'KING-M MUSIC', thumbnailUrl: thumbnail, sourceUrl: link, mediaType: 1, renderLargerThumbnail: true } } : undefined
+        contextInfo: thumbnail ? { externalAdReply: { title, body: 'KING-M MUSIC', thumbnailUrl: thumbnail, sourceUrl: link, mediaType: 1, renderLargerThumbnail: true } } : undefined
       }, { quoted: m });
-      
       await client.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
     } catch (err) {
       console.error('[PLAY] Error:', err.message);
       await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
-      reply('❌ Error occurred.');
+      reply('❌ An error occurred. Please try again.');
     }
   }
   break;
+
                         // ================== GET CHANNEL ID (JID) ==================
 case 'jid':
    
@@ -2662,40 +2543,31 @@ case "song": {
       const link = vid.url;
       const title = vid.title;
       const thumbnail = vid.thumbnail || '';
-      
-      // BK9 MAIN + backup endpoints
-      const mp3Apis = [
-        async () => { const d = await fetchJson(`https://api.bk9.dev/download/youtube?type=mp3&url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.download?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
-        async () => { const d = await fetchJson(`https://api.bk9.dev/download/YouTube%2002?url=${encodeURIComponent(link)}&type=mp3`); const u = d?.data?.url || d?.result?.url || d?.download?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
-        async () => { const d = await fetchJson(`https://api.bk9.dev/download/YouTube%2003?url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.download?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
-        async () => { const d = await fetchJson(`https://api.bk9.dev/download/YouTube%2004?url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.download?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
-        async () => { const d = await fetchJson(`https://api.bk9.dev/download/Youtube%2005?url=${encodeURIComponent(link)}&quality=128`); const u = d?.data?.url || d?.result?.url || d?.download?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
-        async () => { const d = await fetchJson(`https://api.bk9.dev/download/YouTube%2006?url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.download?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
-        async () => { const d = await fetchJson(`https://api.bk9.dev/download/All%20In%20One%202?url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.download?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
-        async () => { const d = await fetchJson(`https://apis.xwolf.space/download/ytmp3?url=${encodeURIComponent(link)}`); const u = d?.downloadUrl || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; }
-      ];
-      
+      m.reply(`_⬇️ Downloading *${title}* as document..._`);
       let downloadUrl = null;
-      for (const fn of mp3Apis) { try { downloadUrl = await fn(); if (downloadUrl) break; } catch (_) {} }
-      
-      if (!downloadUrl) {
-        await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
-        return reply('❌ Failed to download. Try again.');
-      }
-      
-      // Send as document - NO extra messages
+      const _songApis = [
+        async () => { const d = await fetchJson(`https://apiskeith2-production-2ecd.up.railway.app/download/audio?url=${encodeURIComponent(link)}`); const u = d?.result; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+        async () => { const d = await fetchJson(`https://api.bk9.dev/download/ytmp3?url=${encodeURIComponent(link)}`); const u = d?.BK9?.downloadUrl || d?.downloadUrl; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+        async () => { try { const i = await ytdl.getInfo(link, { requestOptions: { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' } } }); const f = ytdl.chooseFormat(i.formats, { filter: 'audioonly', quality: 'highestaudio' }); return f?.url || null; } catch (_) { return null; } },
+        async () => { const d = await fetchJson(`https://api.ryzendesu.vip/api/downloader/ytmp3?url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+        async () => { const d = await fetchJson(`https://api.siputzx.my.id/api/d/ytmp3?url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+        async () => { const d = await fetchJson(`https://api.dreaded.site/api/ytdl/audio?url=${encodeURIComponent(link)}`); const u = d?.result?.url || d?.data?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+        async () => { const d = await fetchJson(`https://api.vreden.my.id/api/v1/download/youtube/audio?url=${encodeURIComponent(link)}&quality=128`); const u = d?.result?.download?.url || d?.data?.url || d?.result?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+        async () => { const d = await fetchJson(`https://api.agatz.xyz/api/ytmp3?url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+      ];
+      for (const fn of _songApis) { try { downloadUrl = await fn(); if (downloadUrl) break; } catch (_) {} }
+      if (!downloadUrl) { await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } }); return reply('❌ All download servers failed. Try again later.'); }
       await client.sendMessage(m.chat, {
         document: { url: downloadUrl },
         mimetype: 'audio/mpeg',
         fileName: `${title}.mp3`,
-        contextInfo: thumbnail ? { externalAdReply: { title: title.substring(0, 35), body: 'KING-M MUSIC', thumbnailUrl: thumbnail, sourceUrl: link, mediaType: 1, renderLargerThumbnail: true } } : undefined
+        contextInfo: thumbnail ? { externalAdReply: { title, body: 'KING-M MUSIC', thumbnailUrl: thumbnail, sourceUrl: link, mediaType: 1, renderLargerThumbnail: true } } : undefined
       }, { quoted: m });
-      
       await client.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
     } catch (err) {
       console.error('[SONG] Error:', err.message);
       await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
-      reply('❌ Error occurred.');
+      reply('❌ An error occurred. Please try again.');
     }
   }
   break;
@@ -2727,55 +2599,38 @@ case 'play2': {
         reply(`_⬇️ Downloading *${title}*..._`);
         console.log(`[PLAY2] Searching: ${link}`);
 
-        // 2. API List (Your new one is first!)
-        const apis = [
-            // Priority APIs
-            `https://apiskeith.top/download/audio?url=${link}`,
-            `https://apis.xwolf.space/download/ytmp3?url=${link}`,
-            // Backups
-            `https://api.vreden.my.id/api/v1/download/youtube/audio?url=${link}&quality=128`,
-            `https://api.agatz.xyz/api/ytmp3?url=${link}`,
-            `https://api.siputzx.my.id/api/d/ytmp3?url=${link}`,
-            `https://api.widipe.com/download/ytdl?url=${link}`,
-            `https://api.dreaded.site/api/ytdl/audio?url=${link}`,
-            `https://api.ryzendesu.vip/api/downloader/ytmp3?url=${link}`
+        // Download with confirmed-working APIs first
+        let _p2Url = null;
+        const _p2Apis = [
+          async () => { const d = await fetchJson(`https://apiskeith2-production-2ecd.up.railway.app/download/audio?url=${encodeURIComponent(link)}`); const u = d?.result; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+          async () => { const d = await fetchJson(`https://api.bk9.dev/download/ytmp3?url=${encodeURIComponent(link)}`); const u = d?.BK9?.downloadUrl || d?.downloadUrl; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+          async () => { try { const i = await ytdl.getInfo(link, { requestOptions: { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' } } }); const f = ytdl.chooseFormat(i.formats, { filter: 'audioonly', quality: 'highestaudio' }); return f?.url || null; } catch (_) { return null; } },
+          async () => { const d = await fetchJson(`https://api.ryzendesu.vip/api/downloader/ytmp3?url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+          async () => { const d = await fetchJson(`https://api.siputzx.my.id/api/d/ytmp3?url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+          async () => { const d = await fetchJson(`https://api.dreaded.site/api/ytdl/audio?url=${encodeURIComponent(link)}`); const u = d?.result?.url || d?.data?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+          async () => { const d = await fetchJson(`https://api.vreden.my.id/api/v1/download/youtube/audio?url=${encodeURIComponent(link)}&quality=128`); const u = d?.result?.download?.url || d?.data?.url || d?.result?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
+          async () => { const d = await fetchJson(`https://api.agatz.xyz/api/ytmp3?url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
         ];
+        for (const fn of _p2Apis) { try { _p2Url = await fn(); if (_p2Url) break; } catch (_) {} }
 
         let success = false;
-
-        // 3. Loop through APIs
-        for (const url of apis) {
-            try {
-                let res = await axios.get(url);
-                let data = res.data;
-                
-                // Extract URL from various possible paths
-                let downloadUrl = data.data?.url || data.result?.url || data.url || data.downloadUrl || data.result;
-
-                if (downloadUrl && typeof downloadUrl === 'string' && downloadUrl.startsWith('http')) {
-                    
-                    await client.sendMessage(m.chat, {
-                        audio: { url: downloadUrl },
-                        mimetype: "audio/mpeg",
-                        fileName: `${title}.mp3`,
-                        contextInfo: {
-                            externalAdReply: {
-                                title: title,
-                                body: "KING M PLAYER",
-                                thumbnailUrl: thumbnail,
-                                sourceUrl: link,
-                                mediaType: 1,
-                                renderLargerThumbnail: true
-                            }
-                        }
-                    }, { quoted: m });
-                    
-                    success = true;
-                    break; 
+        if (_p2Url) {
+            await client.sendMessage(m.chat, {
+                audio: { url: _p2Url },
+                mimetype: "audio/mpeg",
+                fileName: `${title}.mp3`,
+                contextInfo: {
+                    externalAdReply: {
+                        title: title,
+                        body: "KING M PLAYER",
+                        thumbnailUrl: thumbnail,
+                        sourceUrl: link,
+                        mediaType: 1,
+                        renderLargerThumbnail: true
+                    }
                 }
-            } catch (e) {
-                continue;
-            }
+            }, { quoted: m });
+            success = true;
         }
 
         if (!success) {
@@ -4566,7 +4421,7 @@ const rel = await quote(xf, pushname, pppuser)
 }
 break;
 //========================================================================================================================//                  
-            case "url": {
+            case "upload": {
  const fs = require("fs");
 const path = require('path');
 const util = require("util");
@@ -4594,43 +4449,44 @@ if (isTele) {
       break;
 
 //========================================================================================================================//
-     case "upload": {
-    let q = m.quoted ? m.quoted : m;
-    let mime = (q.msg || q).mimetype || '';
-    if (!mime) return reply('❌ Quote an image');
-    
-    let isImage = /image\/(png|jpe?g|gif|webp)/.test(mime);
-    if (!isImage) return reply('❌ Only images supported');
-    
-    let mediaBuffer = await q.download();
-    if (mediaBuffer.length > 32 * 1024 * 1024) return reply('❌ Image too large (max 32MB)');
-    
-    await client.sendMessage(m.chat, { react: { text: '⏳', key: m.key } });
-    
-    try {
-        const formData = new FormData();
-        formData.append('key', '9f5ebe00b1770ea0bc87c194124dd3aa');
-        formData.append('image', mediaBuffer.toString('base64'));
-        
-        const response = await fetch('https://api.imgbb.com/1/upload', {
-            method: 'POST',
-            body: formData
-        });
-        
-        const result = await response.json();
-        
-        if (result.status === 200 && result.data?.url) {
-            reply(`✅ *Uploaded to ImgBB*\n🔗 ${result.data.url}\n📦 Size: ${(mediaBuffer.length / (1024 * 1024)).toFixed(2)}MB`);
-            await client.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
-        } else {
-            throw new Error(result.error?.message || 'Upload failed');
-        }
-    } catch (err) {
-        await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
-        reply(`❌ Upload failed: ${err.message}`);
+        case "url": {
+ const fs = require("fs");
+const path = require('path');
+const util = require("util");
+
+let q = m.quoted ? m.quoted : m
+let mime = (q.msg || q).mimetype || ''
+if (!mime) return m.reply('Quote an image or video')
+let mediaBuffer = await q.download()
+
+  if (mediaBuffer.length > 10 * 1024 * 1024) return m.reply('Media is too large.')
+let isTele = /image\/(png|jpe?g|gif)|video\/mp4/.test(mime)
+
+if (isTele) {
+    let fta2 = await _downloadAndSave(client, q)
+    let link = await uploadToCatbox(fta2)
+
+    const fileSizeMB = (mediaBuffer.length / (1024 * 1024)).toFixed(2)
+    m.reply(`Media Link:\n\n${link}`)
+  } else {
+    m.reply(`Error occured...`)
+  }
     }
-}
-break;
+      break;
+                      
+//========================================================================================================================//                  
+     case 'attp':
+                if (!q) return reply('I need text;')
+              
+                client.sendMessage(m.chat, {
+                    sticker: {
+                        url: `https://api.lolhuman.xyz/api/attp?apikey=cde5404984da80591a2692b6&text=${q}`
+                    }
+                }, {
+                    quoted: m
+                })
+                break;
+
 //========================================================================================================================//                  
     case 'smeme': {
                 let responnd = `Quote an image or sticker with the 2 texts separated with |`
@@ -6642,28 +6498,14 @@ break;
 //========================================================================================================================//
 //========================================================================================================================//                  
 case "alaa": case "wiih": case "waah": case "ehee": case "vv2": case "mmmh": {
-    if (!m.quoted) return;
+    if (!m.quoted) return reply("⚠️ Quote a *View Once* image or video.");
     try {
         await client.sendMessage(m.chat, { react: { text: '⏳', key: m.key } });
 
         const mtype = m.quoted.mtype || '';
         let buffer, isImg, captionText = '';
-        let isStickerReply = false;
-        let isEmojiReply = false;
 
-        // Check for sticker reply
-        if (m.quoted.msg?.stickerMessage) {
-            isStickerReply = true;
-            const stream = await downloadContentFromMessage(m.quoted.msg.stickerMessage, 'sticker');
-            buffer = Buffer.from([]);
-            for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
-        }
-        // Check for emoji reply (text with emoji only)
-        else if (m.quoted.text && /^[\p{Emoji}\s]+$/u.test(m.quoted.text)) {
-            isEmojiReply = true;
-        }
-        // Handle view once messages
-        else if (mtype === 'viewOnceMessageV2' || mtype === 'viewOnceMessageV2Extension') {
+        if (mtype === 'viewOnceMessageV2' || mtype === 'viewOnceMessageV2Extension') {
             const inner = m.quoted.message || {};
             if (inner.imageMessage) {
                 isImg = true;
@@ -6678,9 +6520,7 @@ case "alaa": case "wiih": case "waah": case "ehee": case "vv2": case "mmmh": {
                 buffer = Buffer.from([]);
                 for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
             }
-        } 
-        // Handle normal images/videos
-        else if (mtype === 'imageMessage') {
+        } else if (mtype === 'imageMessage') {
             isImg = true;
             captionText = m.quoted.caption || '';
             buffer = await m.quoted.download();
@@ -6690,35 +6530,23 @@ case "alaa": case "wiih": case "waah": case "ehee": case "vv2": case "mmmh": {
             buffer = await m.quoted.download();
         }
 
+        if (!buffer || !buffer.length) return reply("❌ No media found.");
+
+        const caption = `✨ *KING M VV2 BYPASS* ✨\n\n👤 *From:* @${m.sender.split('@')[0]}\n📝 *Caption:* ${captionText || "None"}`;
+
         const ownerJid = client.user.id.split(":")[0] + "@s.whatsapp.net";
-        
-        // Send to DM based on type
-        if (isStickerReply && buffer) {
-            await client.sendMessage(ownerJid, {
-                sticker: buffer,
-                caption: `📨 *Sticker Reply*\n👤 From: @${m.sender.split('@')[0]}`,
-                mentions: [m.sender]
-            });
-        } 
-        else if (isEmojiReply) {
-            await client.sendMessage(ownerJid, {
-                text: `📨 *Emoji Reply*\n👤 From: @${m.sender.split('@')[0]}\n📝 Emoji: ${m.quoted.text}\n🔗 Chat: wa.me/${m.sender.split('@')[0]}`,
-                mentions: [m.sender]
-            });
-        }
-        else if (buffer) {
-            const caption = `✨ *KING M VV2 BYPASS* ✨\n\n👤 *From:* @${m.sender.split('@')[0]}\n📝 *Caption:* ${captionText || "None"}`;
-            await client.sendMessage(ownerJid, {
-                [isImg ? 'image' : 'video']: buffer,
-                caption,
-                mentions: [m.sender]
-            });
-        }
+        await client.sendMessage(ownerJid, {
+            [isImg ? 'image' : 'video']: buffer,
+            caption,
+            mentions: [m.sender]
+        });
 
         await client.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
+        reply("_Bypass sent to owner DM!_");
 
     } catch (error) {
-        console.error('Error:', error);
+        logError('VV2', error);
+        reply("❌ Failed to bypass. Media may have expired.");
     }
 }
 break;
