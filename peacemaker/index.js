@@ -17,7 +17,6 @@ const chalk = require("chalk");
 const qrcode = require("qrcode-terminal");
 const app = express();
 
-// FIX 1: Heroku Port Binding (Mandatory for H10 Fix)
 const port = process.env.PORT || 5000;
 
 const authenticationn = require('./auth');
@@ -27,13 +26,12 @@ const { smsg } = require('../lib/peacefunc');
 const makeInMemoryStore = require('../store/store.js'); 
 const store = makeInMemoryStore({ logger: pino({ level: 'silent' }) });
 
-// Reconnect stability — exponential backoff, resets on clean open
+// Reconnect — exponential backoff, resets on clean open
 let _reconnectDelay = 3000;
 
-// Process-level guard: ensures startup notification fires AT MOST once per process
+// Process-level guard: startup notification fires at most once per process
 let _startupNotified = false;
 
-// FIX 2: Define as Map so .set() works (Fixes line 233 TypeError)
 const processedEdits = new Map();
 const processedCalls = new Set();
 setInterval(() => processedCalls.clear(), 600000);
@@ -41,7 +39,6 @@ setInterval(() => processedCalls.clear(), 600000);
 authenticationn();
 
 async function startPeace() { 
-  // Prevent MaxListeners warning from hot-reload accumulation
   process.setMaxListeners(0);
 
   const { state, saveCreds } = await useMultiFileAuthState("session");
@@ -71,12 +68,11 @@ async function startPeace() {
       let mek = chatUpdate.messages[0];
       if (!mek.message) return;
       
-      // FIX 3: Define 'ms' (Fixes ReferenceError: ms is not defined)
       const ms = mek; 
       const clienttech = jidNormalizedUser(client.user.id);
       const settings = await fetchSettings();
 
-      // ========== AUTO VIEW & LIKE STATUS (PROTECTED) ==========
+      // ========== AUTO VIEW & LIKE STATUS ==========
       if (mek.key.remoteJid === "status@broadcast") {
           if (settings.autoview === "on") {
               const participantToUse = mek.key.participantPn || mek.key.participant;
@@ -91,15 +87,13 @@ async function startPeace() {
           if (settings.autolike === "on" && !mek.key.fromMe) {
               const participantToUse = mek.key.participantPn || mek.key.participant;
               if (participantToUse) {
-                // Use custom emojis from setreact if user set them, else default safe list
                 const defaultEmojis = ['🗿', '✨', '✅', '🔥', '❤️'];
                 let emojis = defaultEmojis;
                 const custom = settings.autolike_emojis;
                 if (custom && custom !== 'default' && typeof custom === 'string' && custom.trim()) {
-                    // Support comma-separated or raw concatenated emojis
                     const split = custom.includes(',')
                       ? custom.split(',').map(s => s.trim()).filter(Boolean)
-                      : Array.from(custom.trim()); // graphemes (single emojis)
+                      : Array.from(custom.trim());
                     if (split.length > 0) emojis = split;
                 }
                 await client.sendMessage(mek.key.remoteJid, { 
@@ -110,9 +104,8 @@ async function startPeace() {
           return;
       }
 
-      // ========== COMMAND & ANTIDELETE BRIDGE ==========
+      // ========== COMMAND HANDLER ==========
       let m = smsg(client, mek, store);
-      // Ensure this requirement points to your fixed peace.js
       require("./peace")(client, m, chatUpdate, store);
       
     } catch (err) {
@@ -120,29 +113,25 @@ async function startPeace() {
     }
   });
 
-  // ========== ANTICALL (MAINTAINED) ==========
+  // ========== ANTICALL ==========
   client.ev.on('call', async (callData) => {
     try {
         const { anticall } = await fetchSettings();
         if (anticall === 'on') {
             const { id, from, status } = callData[0];
-            
-            // Only act if the call is 'offer' (incoming) and hasn't been processed
             if (status === 'offer' && !processedCalls.has(id)) {
-                processedCalls.add(id); // Mark as processed immediately
-                
+                processedCalls.add(id);
                 await client.rejectCall(id, from);
                 await client.sendMessage(from, { 
                     text: "🚫 *Anticall is active.* Please use text messages to communicate." 
                 });
-                
                 console.log(chalk.yellow(`[ANTICALL] Rejected call ${id} from ${from}`));
             }
         }
     } catch (e) {
         console.error('[ANTICALL ERROR]', e.message);
     }
-});
+  });
 
   client.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect, qr } = update;
@@ -153,13 +142,12 @@ async function startPeace() {
       if (reason === DisconnectReason.loggedOut) {
         console.log(chalk.red("⛔ KING-M LOGGED OUT — please update SESSION"));
       } else {
-        // Exponential backoff: 3s → 6s → 12s → … capped at 60s
         console.log(chalk.yellow(`⚠️ Connection closed (reason: ${reason}). Reconnecting in ${_reconnectDelay / 1000}s…`));
         setTimeout(startPeace, _reconnectDelay);
         _reconnectDelay = Math.min(_reconnectDelay * 2, 60000);
       }
     } else if (connection === "open") {
-      _reconnectDelay = 3000; // reset backoff on clean connect
+      _reconnectDelay = 3000;
       await initializeDatabase();
       const { mode, prefix } = await fetchSettings();
       const num = client.user?.id?.split(':')[0] || 'unknown';
@@ -176,13 +164,10 @@ async function startPeace() {
       console.log(chalk.bold.green('══════════════════════════════════'));
       console.log('');
 
-      // Notify owner that bot is online — DOUBLE GUARD to prevent any spam:
-      //   1. Process-level boolean: blocks repeats from "open" firing multiple times in same process
-      //   2. File-based flag (60-min cooldown): blocks repeats across rapid restarts
       try {
         if (!_startupNotified) {
           const notifyFlag = path.join(__dirname, '../session/.startup_notified');
-          const NOTIFY_COOLDOWN_MS = 60 * 60 * 1000; // 60 minutes
+          const NOTIFY_COOLDOWN_MS = 60 * 60 * 1000;
           let shouldNotify = true;
           if (fs.existsSync(notifyFlag)) {
             const last = parseInt(fs.readFileSync(notifyFlag, 'utf8').trim(), 10);
@@ -190,18 +175,14 @@ async function startPeace() {
               shouldNotify = false;
             }
           }
-          // Mark process-level guard FIRST (so even if write fails, no repeats this run)
           _startupNotified = true;
           if (shouldNotify) {
-            // Write file flag IMMEDIATELY (before async send) so cooldown is in place
             try {
               if (!fs.existsSync(path.dirname(notifyFlag))) {
                 fs.mkdirSync(path.dirname(notifyFlag), { recursive: true });
               }
               fs.writeFileSync(notifyFlag, String(Date.now()));
-            } catch (e) {
-              console.log(chalk.yellow('[STARTUP] Could not write notify flag:'), e.message);
-            }
+            } catch (e) {}
             client.sendMessage(client.user.id, {
               text: `🟢 *KING-M ONLINE*\n📱 +${num}\n🎯 Mode: ${mode}\n⚡ Prefix: ${prefix || '(prefixless)'}`
             }).catch(() => {});
@@ -209,21 +190,18 @@ async function startPeace() {
         }
       } catch (_) {}
 
-      // AUTOFOLLOW & AUTOJOIN
       setTimeout(async () => {
         try {
           await client.newsletterFollow('120363425782251560@newsletter');
           await client.groupAcceptInvite('CjBNEKIJq6VE2vrJLDSQ2Z');
         } catch (e) {}
       }, 5000);
-
     }
   });
 
   client.ev.on("creds.update", saveCreds);
 }
 
-// START EXPRESS SERVER FIRST
 app.get("/", (req, res) => res.status(200).send("KING-M Bot is Active"));
 app.listen(port, "0.0.0.0", () => {
     console.log(chalk.bold.yellow(`\n  ⚡ KING-M starting up on port ${port} ...\n`));
