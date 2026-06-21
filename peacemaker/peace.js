@@ -13,6 +13,10 @@ const yts = require("yt-search");
 let lastTextTime = 0;
 const messageDelay = 3000;
 
+// ── Group metadata cache — prevents WhatsApp rate-limiting on every message ──
+const _groupMetaCache = new Map(); // jid → { data, ts }
+const GROUP_META_TTL = 5 * 60 * 1000; // 5 minutes
+
 // Polyfill for downloadAndSaveMediaMessage (removed in newer Baileys)
 const _downloadAndSave = async (client, msg) => {
     let buf;
@@ -93,8 +97,10 @@ let _attachedClient = null;
 async function _handleDeleted(client, mek, mode) {
     try {
         const id = mek.message.protocolMessage.key.id;
-        if (_delProcessed.has(id)) return;
-        _delProcessed.add(id);
+        if (!client._delProcessed) client._delProcessed = new Set();
+        if (client._delProcessed.has(id)) return;
+        client._delProcessed.add(id);
+        setTimeout(() => client._delProcessed?.delete(id), 120000);
         if (mek.key.fromMe) return; // bot's own deletion — never restore
         const original = _msgStore.get(id);
         if (!original) return;
@@ -128,8 +134,8 @@ async function _handleDeleted(client, mek, mode) {
 }
 
 function attachAntiListeners(client) {
-    if (_attachedClient === client) return; // already registered for this client session
-    _attachedClient = client;
+    if (client._kingMAntiListeners) return; // stored on client obj — survives hot-reload
+    client._kingMAntiListeners = true;
 
     // ── Store messages + ANTIDELETE ──
     client.ev.on('messages.upsert', async ({ messages }) => {
@@ -155,8 +161,10 @@ function attachAntiListeners(client) {
             const aeMode = s.antiedit || 'off';
             if (aeMode === 'off') continue;
             const editId = key.id; // ID of the original message
-            if (_editProcessed.has(editId)) continue;
-            _editProcessed.add(editId);
+            if (!client._editProcessed) client._editProcessed = new Set();
+            if (client._editProcessed.has(editId)) continue;
+            client._editProcessed.add(editId);
+            setTimeout(() => client._editProcessed?.delete(editId), 120000);
             if (key.fromMe) continue;
             const botJid = client.user.id.split(':')[0] + '@s.whatsapp.net';
             const editorJid = key.participant || key.remoteJid;
@@ -308,29 +316,72 @@ const dev = "254769995625";
 
 //========================================================================================================================//                  
 //========================================================================================================================//          
-    const groupMetadata = m.isGroup ? await client.groupMetadata(m.chat).catch((e) => { }) : "";  
+    const groupMetadata = m.isGroup ? await (async () => {
+        const _now = Date.now();
+        const _cached = _groupMetaCache.get(m.chat);
+        if (_cached && (_now - _cached.ts) < GROUP_META_TTL) return _cached.data;
+        const _data = await client.groupMetadata(m.chat).catch(() => null);
+        if (_data) _groupMetaCache.set(m.chat, { data: _data, ts: _now });
+        return _data || _cached?.data || null;
+    })() : null;
     const groupName = m.isGroup && groupMetadata ? await groupMetadata.subject : "";  
     const participants = m.isGroup && groupMetadata
   ? groupMetadata.participants
       .filter(p => p.pn)
       .map(p => p.pn)
   : [];
-    const groupAdmin = m.isGroup&& groupMetadata
+    const groupAdmin = m.isGroup && groupMetadata
   ? groupMetadata.participants
-      .filter(p => p.admin && p.pn)
-      .map(p => p.pn)
+      .filter(p => p.admin)
+      .map(p => p.pn || p.id.split('@')[0].split(':')[0])
   : [];
-    const isBotAdmin = m.isGroup ? groupAdmin.includes(botNumber) : false; 
+    const botPn = botNumber.replace(/[^0-9]/g, '');
+
+    // Get bot's own LID from client.user.lid (e.g. "227247323652252:51@lid" → "227247323652252@lid")
+    const botLidRaw = client.user?.lid || '';
+    const botLidNorm = botLidRaw ? (botLidRaw.split(':')[0] + '@lid') : null;
+
+    // Helper: does a participant ID belong to the bot?
+    const isBot = (pid) => {
+      if (!pid) return false;
+      if (pid === botNumber || pid === botLidNorm) return true;
+      if (botLidNorm && pid.startsWith(botLidNorm.split('@')[0])) return true;
+      if (client.decodeJid(pid) === botNumber) return true;
+      const pNum = pid.split('@')[0].split(':')[0];
+      if (pNum === botPn) return true;
+      return false;
+    };
+
+
+    const isBotAdmin = m.isGroup && groupMetadata
+      ? groupMetadata.participants.some(p => p.admin && isBot(p.id))
+      : false;
+
         const groupSender = m.isGroup && groupMetadata
   ? (() => {
       const found = groupMetadata.participants.find(p => 
-        p.id === sender || client.decodeJid(p.id) === client.decodeJid(sender)
+        p.id === sender || client.decodeJid(p.id) === client.decodeJid(sender) ||
+        (senderCandidates.length && senderCandidates.includes((p.id || '').split('@')[0].split(':')[0]))
       );
       return found?.pn || sender;
     })()
   : sender;
-     const isAdmin = m.isGroup ? groupAdmin.includes(groupSender) : false;
-     const Owner = owner.map((v) => v.replace(/[^0-9]/g, "") + "@s.whatsapp.net").includes(groupSender) 
+
+    const isAdmin = m.isGroup && groupMetadata
+      ? (
+        // Sender IS the bot and bot is a group admin (self-mode)
+        (itsMe && isBotAdmin) ||
+        groupMetadata.participants.some(p => {
+          if (!p.admin) return false;
+          const pNum = (p.id || '').split('@')[0].split(':')[0];
+          if (senderCandidates.includes(pNum)) return true;
+          if (p.pn && senderCandidates.includes(p.pn.replace(/[^0-9]/g, ''))) return true;
+          if (p.id === sender || client.decodeJid(p.id) === client.decodeJid(sender)) return true;
+          return false;
+        })
+      )
+      : false;
+     const Owner = isOwner || owner.map((v) => v.replace(/[^0-9]/g, "") + "@s.whatsapp.net").includes(groupSender) 
      const Dev = '254769995625'.split(",");
      const date = new Date()  
      const timestamp = speed(); 
@@ -745,16 +796,20 @@ function formatSpeed(ms) {
 const badwords = await getBadwords();
 if (
   badword === 'on' &&
+  m.isGroup &&
   isBotAdmin &&
   !isAdmin &&
-  body &&
-  (new RegExp(`\\b(${badwords.join('|')})\\b`, 'i')).test(body.toLowerCase())
+  !Owner &&
+  badwords.length > 0
 ) {
-  reply("⚠️ Bad word detected! You will be removed.");
-  client.groupParticipantsUpdate(from, [sender], 'remove');
+  const _checkText = (budy || body || '').toLowerCase();
+  if (_checkText && (new RegExp(`\\b(${badwords.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\b`, 'i')).test(_checkText)) {
+    reply("⚠️ Bad word detected! You will be removed.");
+    client.groupParticipantsUpdate(from, [sender], 'remove');
+  }
 }
 //========================================================================================================================//      
-if (antilink === 'on' && body.includes('chat.whatsapp.com') && !Owner && isBotAdmin && !isAdmin && m.isGroup) { 
+if (antilink === 'on' && (budy || body).includes('chat.whatsapp.com') && !Owner && isBotAdmin && !isAdmin && m.isGroup) { 
     kid = m.sender; 
     
     client.sendMessage(m.chat, { 
@@ -776,7 +831,7 @@ if (antilink === 'on' && body.includes('chat.whatsapp.com') && !Owner && isBotAd
 
 //========================================================================================================================//
 
-if (antilinkall === 'on' && body.includes('https://') && !Owner && isBotAdmin && !isAdmin && m.isGroup) { 
+if (antilinkall === 'on' && (budy || body).includes('https://') && !Owner && isBotAdmin && !isAdmin && m.isGroup) { 
     ki = m.sender; 
     
     client.sendMessage(m.chat, { 
@@ -1357,6 +1412,7 @@ case "antisticker": {
     }
 
     await updateSetting("antisticker", newMode);
+    fetchSettings.invalidate();
     reply(`✅ Anti-Sticker mode set to *${newMode.toUpperCase()}*`);
 }
 break;
@@ -1450,6 +1506,7 @@ case "antilink": {
   if (!["on", "off"].includes(text)) return reply("Usage: antilink on/off");
   if (text === current) return reply(`✅ Antilink is already *${text.toUpperCase()}*`);
   await updateSetting("antilink", text);
+  fetchSettings.invalidate();
   reply(`✅ Antilink has been turned *${text.toUpperCase()}*`);
 }
 break;
@@ -1462,6 +1519,7 @@ case "antilinkall": {
   if (!["on", "off"].includes(text)) return reply("Usage: antilinkall on/off");
   if (text === current) return reply(`✅ Antilinkall is already *${text.toUpperCase()}*`);
   await updateSetting("antilinkall", text);
+  fetchSettings.invalidate();
   reply(`✅ Antilinkall has been turned *${text.toUpperCase()}*`);
 }
 break;             //Status mention
@@ -1480,10 +1538,12 @@ case 'antistatus':
     if (text.toLowerCase() === 'on') {
         await updateSetting('antistatus', 'on');
         await updateSetting('antigroupmention', 'on');
+        fetchSettings.invalidate();
         m.reply("✅ *Anti-Status Mention* has been enabled. I will now delete all 'Tag All' mentions.");
     } else if (text.toLowerCase() === 'off') {
         await updateSetting('antistatus', 'off');
         await updateSetting('antigroupmention', 'off');
+        fetchSettings.invalidate();
         m.reply("❌ *Anti-Status Mention* has been disabled.");
     } else {
         m.reply(`Use *on* to enable or *off* to disable.`);
@@ -1516,50 +1576,55 @@ case 'gs': {
     await client.sendMessage(m.chat, { react: { text: '⏳', key: m.key } });
 
     try {
-        let payload = { groupStatusMessage: {} };
         const successMessage = `✅ *Status Posted Successfully!*`;
+        let payload = null;
 
         if (m.quoted) {
             const mime = (m.quoted.msg || m.quoted).mimetype || "";
-            const q = text || ""; 
+            const q = text || m.quoted.caption || "";
 
             if (/image/.test(mime)) {
                 const buffer = await downloadMediaMessage(m.quoted.fakeObj || m.quoted, 'buffer', {});
                 tempFilePath = path.join(tempDir, `status_${Date.now()}.jpg`);
                 fs.writeFileSync(tempFilePath, buffer);
-                payload.groupStatusMessage.image = { url: tempFilePath };
-                payload.groupStatusMessage.caption = q || m.quoted.caption || "";
+                payload = { image: { url: tempFilePath }, caption: q };
 
             } else if (/video/.test(mime)) {
                 const buffer = await downloadMediaMessage(m.quoted.fakeObj || m.quoted, 'buffer', {});
                 tempFilePath = path.join(tempDir, `status_${Date.now()}.mp4`);
                 fs.writeFileSync(tempFilePath, buffer);
-                payload.groupStatusMessage.video = { url: tempFilePath };
-                payload.groupStatusMessage.caption = q || m.quoted.caption || "";
+                payload = { video: { url: tempFilePath }, caption: q };
 
             } else if (/audio/.test(mime)) {
                 const buffer = await downloadMediaMessage(m.quoted.fakeObj || m.quoted, 'buffer', {});
                 tempFilePath = path.join(tempDir, `status_${Date.now()}.mp3`);
                 fs.writeFileSync(tempFilePath, buffer);
-                payload.groupStatusMessage.audio = { url: tempFilePath };
+                payload = { audio: { url: tempFilePath }, mimetype: 'audio/mpeg', ptt: false };
 
             } else if (/webp/.test(mime)) {
                 const buffer = await downloadMediaMessage(m.quoted.fakeObj || m.quoted, 'buffer', {});
                 tempFilePath = path.join(tempDir, `status_${Date.now()}.webp`);
                 fs.writeFileSync(tempFilePath, buffer);
-                payload.groupStatusMessage.sticker = { url: tempFilePath };
+                payload = { sticker: { url: tempFilePath } };
 
-            } else if (m.quoted.text || m.quoted.conversation) {
-                payload.groupStatusMessage.text = m.quoted.text || m.quoted.conversation;
+            } else {
+                const fallback = m.quoted.text || m.quoted.conversation || q;
+                if (fallback) payload = { text: fallback };
             }
         } else {
-            payload.groupStatusMessage.text = text;
+            payload = { text };
         }
 
-        // Send the status update
-        await client.sendMessage(m.chat, payload, { quoted: m });
-        
-        // Send the requested success message with the channel link
+        if (!payload) return reply("❌ Nothing to send. Reply to media or provide text.");
+
+        // Build statusJidList from individual participant phone JIDs
+        const botJid = client.user.id.split(':')[0] + '@s.whatsapp.net';
+        const participantJids = (groupMetadata?.participants || [])
+            .map(p => p.pn ? p.pn + '@s.whatsapp.net' : null)
+            .filter(Boolean);
+        const statusJidList = [...new Set([...participantJids, botJid])];
+        if (statusJidList.length === 0) return reply("❌ No group participants found.");
+        await client.sendMessage('status@broadcast', payload, { statusJidList });
         await client.sendMessage(m.chat, { text: successMessage }, { quoted: m });
         await client.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
 
@@ -1943,6 +2008,19 @@ case "wapresence": {
   if (text === current) return reply(`✅ Presence is already *${text}*`);
   await updateSetting("wapresence", text);
   reply(`✅ Presence updated to *${text}*`);
+}
+break;
+
+case "badword": {
+  if (!Owner) throw NotOwner;
+  const settings = await getSettings();
+  const current = settings.badword || 'off';
+  if (!text) return reply(`🛡️ Badword filter is currently *${current.toUpperCase()}*\nUsage: ${prefix}badword on/off`);
+  if (!['on', 'off'].includes(text)) return reply('Usage: badword on/off');
+  if (text === current) return reply(`✅ Badword filter is already *${text.toUpperCase()}*`);
+  await updateSetting('badword', text);
+  fetchSettings.invalidate();
+  reply(`✅ Badword filter turned *${text.toUpperCase()}*\n\n_Use ${prefix}addbadword <word> to add banned words._`);
 }
 break;
 
@@ -4193,28 +4271,30 @@ m.reply("An error occured.")
 
 //========================================================================================================================//                  
               case "alive": case "test": {
-                      const audiovn = "./Media/alive.mp3";
-    const dooc = {
-        audio: {
-          url: audiovn
-        },
-        mimetype: 'audio/mp4',
-        ptt: true,
-        waveform:  [100, 0, 100, 0, 100, 0, 100],
-        fileName: "king m",
-
-        contextInfo: {
-          mentionedJid: [m.sender],
-          externalAdReply: {
-          title: "👋 ʜᴇʟʟᴏ, ᴍᴏʀᴛᴀʟ! ⚡ KING M ɪs ᴀʟɪᴠᴇ ʀᴇᴀᴅʏ ᴛᴏ ᴄᴏᴍғᴏʀᴛ ʏᴏᴜ",
-          body: "KING M",
-          thumbnailUrl: "",
-          sourceUrl: '',
-          mediaType: 1,
-          renderLargerThumbnail: true
-          }}
-      };
-        await client.sendMessage(m.chat, dooc, {quoted: m });
+                try {
+                  const dooc = {
+                      audio: fs.readFileSync('./Media/alive.mp3'),
+                      mimetype: 'audio/mp4',
+                      ptt: true,
+                      waveform: [100, 0, 100, 0, 100, 0, 100],
+                      fileName: "king m",
+                      contextInfo: {
+                        mentionedJid: [m.sender],
+                        externalAdReply: {
+                          title: "👋 ʜᴇʟʟᴏ, ᴍᴏʀᴛᴀʟ! ⚡ KING M ɪs ᴀʟɪᴠᴇ ʀᴇᴀᴅʏ ᴛᴏ ᴄᴏᴍғᴏʀᴛ ʏᴏᴜ",
+                          body: "KING M",
+                          thumbnailUrl: "",
+                          sourceUrl: '',
+                          mediaType: 1,
+                          renderLargerThumbnail: true
+                        }
+                      }
+                  };
+                  await client.sendMessage(m.chat, dooc, {quoted: m});
+                } catch (e) {
+                  console.log(chalk.red('[TEST CMD ERROR]'), e.message);
+                  await m.reply('🟢 *KING-M is alive!*');
+                }
               }
                  break;
                       
@@ -4918,6 +4998,7 @@ case 'antimention': {
     if (!['on', 'off'].includes(text)) return m.reply('Usage: antimention on/off');
     if (text === current) return m.reply(`✅ Antimention is already *${text.toUpperCase()}*`);
     await updateSetting('antimention', text);
+    fetchSettings.invalidate();
     m.reply(`✅ Antimention turned *${text.toUpperCase()}*\n\n_When ON: anyone tagging 5+ people gets warned then kicked after 3 strikes._`);
 }
 break;
@@ -4931,6 +5012,7 @@ case 'antiforward': case 'antiforwarded': {
     if (!['on', 'off'].includes(text)) return m.reply('Usage: antiforward on/off');
     if (text === current) return m.reply(`✅ Antiforward is already *${text.toUpperCase()}*`);
     await updateSetting('antiforward', text);
+    fetchSettings.invalidate();
     m.reply(`✅ Antiforward turned *${text.toUpperCase()}*\n\n_When ON: forwarded messages are deleted and the sender is warned (3 strikes = kick)._`);
 }
 break;
@@ -5390,27 +5472,36 @@ case 'fbdl': {
     await client.sendMessage(m.chat, { react: { text: '⬇️', key: m.key } });
 
     try {
-        // 4. Fetch Video Data
-        const apiUrl = `https://apiskeith.vercel.app/download/fbdown?url=${encodeURIComponent(url)}`;
-        
-        const response = await axios.get(apiUrl, {
-            timeout: 15000,
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-        });
+        // 4. Fetch Video Data — try multiple free APIs
+        let fbvid = null;
+        let title = "Facebook Video";
 
-        const apiResult = response.data;
+        const apis = [
+            async () => {
+                const r = await axios.get(`https://api.bk9.dev/download/fb?url=${encodeURIComponent(url)}`, { timeout: 15000 });
+                const d = r.data?.BK9;
+                if (d?.hd || d?.sd) { fbvid = d.hd || d.sd; title = d.title || title; }
+            },
+            async () => {
+                const r = await axios.get(`https://api.agatz.xyz/api/facebook?url=${encodeURIComponent(url)}`, { timeout: 15000 });
+                const d = r.data?.data;
+                if (d?.VideoHD || d?.VideoSD) { fbvid = d.VideoHD || d.VideoSD; title = d.title || title; }
+            },
+            async () => {
+                const r = await axios.get(`https://api.ryzendesu.vip/api/downloader/facebook?url=${encodeURIComponent(url)}`, { timeout: 15000 });
+                const d = r.data?.data;
+                if (d?.video_hd || d?.video_sd) { fbvid = d.video_hd || d.video_sd; title = d.title || title; }
+            }
+        ];
 
-        // 5. Validate API Result
-        if (!apiResult || !apiResult.status || !apiResult.result || !apiResult.result.media) {
-            throw new Error('Invalid API response');
+        for (const tryApi of apis) {
+            try { await tryApi(); } catch (_) {}
+            if (fbvid) break;
         }
 
-        // 6. Get Best Quality URL
-        const fbvid = apiResult.result.media.hd || apiResult.result.media.sd;
-        const title = apiResult.result.title || "Facebook Video";
-        const caption = `${title}\n\nBy ${botName}`;
+        if (!fbvid) throw new Error('Could not fetch video from any source. The video may be private or region-locked.');
 
-        if (!fbvid) throw new Error('Video not found in API response');
+        const caption = `${title}\n\nBy ${botName}`;
 
         // =========================================================
         // 🧠 METHOD 1: Direct URL (Fastest)
@@ -6140,7 +6231,7 @@ https://github.com/sesco001/KING-MD
     if (!quoted) throw `Send or tag an image with the caption ${prefix + command}`; 
     if (!/image/.test(mime)) throw `Send or tag an image with the caption ${prefix + command}`; 
     if (/webp/.test(mime)) throw `Send or tag an image with the caption ${prefix + command}`; 
-    let mediaBuf = await downloadMediaMessage(quoted, 'buffer', {}); 
+    let mediaBuf = await downloadMediaMessage(quoted.fakeObj || m.quoted.fakeObj || quoted, 'buffer', {}); 
     await client.updateProfilePicture(m.chat, mediaBuf);
     reply('Group icon updated Successfully✅️'); 
     } 
@@ -7855,14 +7946,11 @@ break;
       } // end switch
     } // end if (cmd)
   } catch (err) {
-    // FIX: Define a local check for the catch block since 'Owner' might be lost
-    const botNumber = client.user.id.split(':')[0] + '@s.whatsapp.net';
-    const isBotOwner = owner.map((v) => v.replace(/[^0-9]/g, "") + "@s.whatsapp.net").includes(m.sender) || m.sender === botNumber;
-
-    if (isBotOwner || !m.isGroup) {
-      m.reply(util.format(err));
-    } else {
-      console.log(chalk.red('[ERR]'), util.format(err));
+    const msg = util.format(err);
+    console.log(chalk.red('[ERR]'), msg);
+    // Don't attempt m.reply on sendMessage timeouts — it would just hang another 15s
+    if (!msg.includes('timed out')) {
+      try { await m.reply(msg); } catch (_) {}
     }
   }
 };
