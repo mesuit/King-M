@@ -2352,45 +2352,203 @@ await client.sendMessage(
 break;
 
 //========================================================================================================================//                          
-  case "play": {
+ case "play": {
     if (!text) return reply(`⚠️ *Usage:* ${prefix}play <Song Name>`);
-    try {
-      await client.sendMessage(m.chat, { react: { text: '⏳', key: m.key } });
-      const search = await yts(text);
-      if (!search.all || !search.all.length) return reply('❌ No results found.');
-      const vid = search.all[0];
-      const link = vid.url;
-      const title = vid.title;
-      const thumbnail = vid.thumbnail || '';
-      m.reply(`_⬇️ Downloading *${title}*..._`);
-      let downloadUrl = null;
-      const _playApis = [
-        async () => { const d = await fetchJson(`https://apiskeith2-production-2ecd.up.railway.app/download/audio?url=${encodeURIComponent(link)}`); const u = d?.result; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
-        async () => { const d = await fetchJson(`https://api.bk9.dev/download/ytmp3?url=${encodeURIComponent(link)}`); const u = d?.BK9?.downloadUrl || d?.downloadUrl; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
-        async () => { try { const i = await ytdl.getInfo(link, { requestOptions: { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' } } }); const f = ytdl.chooseFormat(i.formats, { filter: 'audioonly', quality: 'highestaudio' }); return f?.url || null; } catch (_) { return null; } },
-        async () => { const d = await fetchJson(`https://api.ryzendesu.vip/api/downloader/ytmp3?url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
-        async () => { const d = await fetchJson(`https://api.siputzx.my.id/api/d/ytmp3?url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
-        async () => { const d = await fetchJson(`https://api.dreaded.site/api/ytdl/audio?url=${encodeURIComponent(link)}`); const u = d?.result?.url || d?.data?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
-        async () => { const d = await fetchJson(`https://api.vreden.my.id/api/v1/download/youtube/audio?url=${encodeURIComponent(link)}&quality=128`); const u = d?.result?.download?.url || d?.data?.url || d?.result?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
-        async () => { const d = await fetchJson(`https://api.agatz.xyz/api/ytmp3?url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
-      ];
-      for (const fn of _playApis) { try { downloadUrl = await fn(); if (downloadUrl) break; } catch (_) {} }
-      if (!downloadUrl) { await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } }); return reply('❌ All download servers failed. Try again later.'); }
-      await client.sendMessage(m.chat, {
-        audio: { url: downloadUrl },
-        mimetype: 'audio/mpeg',
-        fileName: `${title}.mp3`,
-        contextInfo: thumbnail ? { externalAdReply: { title, body: 'KING-M MUSIC', thumbnailUrl: thumbnail, sourceUrl: link, mediaType: 1, renderLargerThumbnail: true } } : undefined
-      }, { quoted: m });
-      await client.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
-    } catch (err) {
-      console.error('[PLAY] Error:', err.message);
-      await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
-      reply('❌ An error occurred. Please try again.');
-    }
-  }
-  break;
+    
+    const fetchWithTimeout = (url, timeout = 12000) => {
+        return Promise.race([
+            fetchJson(url),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('API Timeout')), timeout))
+        ]);
+    };
 
+    try {
+        await client.sendMessage(m.chat, { react: { text: '⏳', key: m.key } });
+        const search = await yts(text);
+        if (!search.all || !search.all.length) return reply('❌ No results found.');
+
+        const vid = search.all[0];
+        const link = vid.url;
+        const title = vid.title;
+        const thumbnail = vid.thumbnail || '';
+        m.reply(`_⬇️ Downloading *${title}...*_`);
+
+        let downloadUrl = null;
+
+        const _playApis = [
+            // === NEW: CypherX Bot Media API ===
+            async () => {
+                const d = await fetchWithTimeout(`https://media.cypherxbot.space/api/ytmp3?url=${encodeURIComponent(link)}`);
+                const u = d?.result?.url || d?.result?.downloadUrl || d?.result?.link || d?.data?.url || d?.downloadUrl || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+            async () => {
+                const d = await fetchWithTimeout(`https://media.cypherxbot.space/download/audio?url=${encodeURIComponent(link)}`);
+                const u = d?.result?.url || d?.result?.downloadUrl || d?.result?.link || d?.data?.url || d?.downloadUrl || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+            async () => {
+                const d = await fetchWithTimeout(`https://media.cypherxbot.space/ytmp3?url=${encodeURIComponent(link)}`);
+                const u = d?.result?.url || d?.result?.downloadUrl || d?.result?.link || d?.data?.url || d?.downloadUrl || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+
+            // === NEW: Prince Techn API (with apikey: prince) ===
+            async () => {
+                const d = await fetchWithTimeout(`https://api.princetechn.com/api/ytmp3?url=${encodeURIComponent(link)}&apikey=prince`);
+                const u = d?.result?.url || d?.result?.downloadUrl || d?.result?.link || d?.data?.url || d?.downloadUrl || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+            async () => {
+                const d = await fetchWithTimeout(`https://api.princetechn.com/api/download/ytmp3?url=${encodeURIComponent(link)}&apikey=prince`);
+                const u = d?.result?.url || d?.result?.downloadUrl || d?.result?.link || d?.data?.url || d?.downloadUrl || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+            async () => {
+                const d = await fetchWithTimeout(`https://api.princetechn.com/ytmp3?url=${encodeURIComponent(link)}&apikey=prince`);
+                const u = d?.result?.url || d?.result?.downloadUrl || d?.result?.link || d?.data?.url || d?.downloadUrl || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+            async () => {
+                const d = await fetchWithTimeout(`https://api.princetechn.com/api/ytdl/audio?url=${encodeURIComponent(link)}&apikey=prince`);
+                const u = d?.result?.url || d?.result?.downloadUrl || d?.result?.link || d?.data?.url || d?.downloadUrl || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+
+            // === Keith API ===
+            async () => {
+                const d = await fetchWithTimeout(`https://apiskeith2-production-ec66.up.railway.app/api/download/audio?url=${encodeURIComponent(link)}`);
+                const u = d?.result?.url || d?.result?.download?.url || d?.result || d?.data?.url || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+            async () => {
+                const d = await fetchWithTimeout(`https://apiskeith2-production-ec66.up.railway.app/download/audio?url=${encodeURIComponent(link)}`);
+                const u = d?.result?.url || d?.result?.download?.url || d?.result || d?.data?.url || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+
+            // === Cod3Uchiha API ===
+            async () => {
+                const d = await fetchWithTimeout(`https://api.cod3uchiha.com/api/ytmp3?url=${encodeURIComponent(link)}`);
+                const u = d?.result?.url || d?.result?.downloadUrl || d?.result?.link || d?.data?.url || d?.downloadUrl || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+            async () => {
+                const d = await fetchWithTimeout(`https://api.cod3uchiha.com/api/download/ytmp3?url=${encodeURIComponent(link)}`);
+                const u = d?.result?.url || d?.result?.downloadUrl || d?.result?.link || d?.data?.url || d?.downloadUrl || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+
+            // === BK9 API ===
+            async () => {
+                const d = await fetchWithTimeout(`https://api.bk9.dev/download/ytmp3?url=${encodeURIComponent(link)}`);
+                const u = d?.BK9?.downloadUrl || d?.downloadUrl || d?.result?.url || d?.data?.url || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+
+            // === Other Fallbacks ===
+            async () => {
+                const d = await fetchWithTimeout(`https://api.ryzendesu.vip/api/downloader/ytmp3?url=${encodeURIComponent(link)}`);
+                const u = d?.data?.url || d?.result?.url || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+            async () => {
+                const d = await fetchWithTimeout(`https://api.siputzx.my.id/api/d/ytmp3?url=${encodeURIComponent(link)}`);
+                const u = d?.data?.url || d?.result?.url || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+            async () => {
+                const d = await fetchWithTimeout(`https://api.dreaded.site/api/ytdl/audio?url=${encodeURIComponent(link)}`);
+                const u = d?.result?.url || d?.data?.url || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+            async () => {
+                const d = await fetchWithTimeout(`https://api.vreden.my.id/api/v1/download/youtube/audio?url=${encodeURIComponent(link)}&quality=128`);
+                const u = d?.result?.download?.url || d?.data?.url || d?.result?.url || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+            async () => {
+                const d = await fetchWithTimeout(`https://api.agatz.xyz/api/ytmp3?url=${encodeURIComponent(link)}`);
+                const u = d?.data?.url || d?.result?.url || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+            async () => {
+                const d = await fetchWithTimeout(`https://api.akuari.my.id/downloader/youtube?link=${encodeURIComponent(link)}`);
+                const u = d?.result?.audio || d?.result?.url || d?.audio || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+            async () => {
+                const d = await fetchWithTimeout(`https://api.nyxs.pw/dl/yt-direct?url=${encodeURIComponent(link)}`);
+                const u = d?.result?.audio || d?.result?.url || d?.audio || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+
+            // === ULTIMATE FALLBACK: ytdl-core ===
+            async () => {
+                const info = await ytdl.getInfo(link, {
+                    requestOptions: {
+                        headers: {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                        }
+                    }
+                });
+                const format = ytdl.chooseFormat(info.formats, { filter: 'audioonly', quality: 'highestaudio' });
+                return format?.url || null;
+            },
+            async () => {
+                const info = await ytdl.getInfo(link, {
+                    requestOptions: {
+                        headers: {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                        }
+                    }
+                });
+                const format = info.formats.find(fmt =>
+                    (fmt.mimeType?.includes('audio/mp4') || fmt.mimeType?.includes('audio/webm')) && fmt.audioBitrate
+                );
+                return format?.url || null;
+            }
+        ];
+
+        for (const fn of _playApis) {
+            try {
+                downloadUrl = await fn();
+                if (downloadUrl) break;
+            } catch (e) {
+                continue;
+            }
+        }
+
+        if (!downloadUrl) {
+            await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
+            return reply('❌ All download servers failed. The video may be age-restricted or all APIs are down. Try again later.');
+        }
+
+        await client.sendMessage(m.chat, {
+            audio: { url: downloadUrl },
+            mimetype: 'audio/mpeg',
+            fileName: `${title}.mp3`,
+            contextInfo: thumbnail ? {
+                externalAdReply: {
+                    title,
+                    body: 'KING-M MUSIC',
+                    thumbnailUrl: thumbnail,
+                    sourceUrl: link,
+                    mediaType: 1,
+                    renderLargerThumbnail: true
+                }
+            } : undefined
+        }, { quoted: m });
+
+        await client.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
+
+    } catch (err) {
+        console.error('[PLAY] Error:', err.message || err);
+        await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
+        reply('❌ An error occurred. Please try again.');
+    }
+}
+break;
                         // ================== GET CHANNEL ID (JID) ==================
 case 'jid':
    
@@ -2613,43 +2771,201 @@ let options = []
         // Ensure you have this at the top: const yts = require('yt-search');
 case "song": {
     if (!text) return reply(`⚠️ *Usage:* ${prefix}song <Song Name>`);
+    
+    const fetchWithTimeout = (url, timeout = 12000) => {
+        return Promise.race([
+            fetchJson(url),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('API Timeout')), timeout))
+        ]);
+    };
+
     try {
-      await client.sendMessage(m.chat, { react: { text: '⏳', key: m.key } });
-      const search = await yts(text);
-      if (!search.all || !search.all.length) return reply('❌ No results found.');
-      const vid = search.all[0];
-      const link = vid.url;
-      const title = vid.title;
-      const thumbnail = vid.thumbnail || '';
-      m.reply(`_⬇️ Downloading *${title}* as document..._`);
-      let downloadUrl = null;
-      const _songApis = [
-        async () => { const d = await fetchJson(`https://apiskeith2-production-2ecd.up.railway.app/download/audio?url=${encodeURIComponent(link)}`); const u = d?.result; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
-        async () => { const d = await fetchJson(`https://api.bk9.dev/download/ytmp3?url=${encodeURIComponent(link)}`); const u = d?.BK9?.downloadUrl || d?.downloadUrl; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
-        async () => { try { const i = await ytdl.getInfo(link, { requestOptions: { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' } } }); const f = ytdl.chooseFormat(i.formats, { filter: 'audioonly', quality: 'highestaudio' }); return f?.url || null; } catch (_) { return null; } },
-        async () => { const d = await fetchJson(`https://api.ryzendesu.vip/api/downloader/ytmp3?url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
-        async () => { const d = await fetchJson(`https://api.siputzx.my.id/api/d/ytmp3?url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
-        async () => { const d = await fetchJson(`https://api.dreaded.site/api/ytdl/audio?url=${encodeURIComponent(link)}`); const u = d?.result?.url || d?.data?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
-        async () => { const d = await fetchJson(`https://api.vreden.my.id/api/v1/download/youtube/audio?url=${encodeURIComponent(link)}&quality=128`); const u = d?.result?.download?.url || d?.data?.url || d?.result?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
-        async () => { const d = await fetchJson(`https://api.agatz.xyz/api/ytmp3?url=${encodeURIComponent(link)}`); const u = d?.data?.url || d?.result?.url || d?.url; return (u && typeof u === 'string' && u.startsWith('http')) ? u : null; },
-      ];
-      for (const fn of _songApis) { try { downloadUrl = await fn(); if (downloadUrl) break; } catch (_) {} }
-      if (!downloadUrl) { await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } }); return reply('❌ All download servers failed. Try again later.'); }
-      await client.sendMessage(m.chat, {
-        document: { url: downloadUrl },
-        mimetype: 'audio/mpeg',
-        fileName: `${title}.mp3`,
-        contextInfo: thumbnail ? { externalAdReply: { title, body: 'KING-M MUSIC', thumbnailUrl: thumbnail, sourceUrl: link, mediaType: 1, renderLargerThumbnail: true } } : undefined
-      }, { quoted: m });
-      await client.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
+        await client.sendMessage(m.chat, { react: { text: '⏳', key: m.key } });
+        const search = await yts(text);
+        if (!search.all || !search.all.length) return reply('❌ No results found.');
+
+        const vid = search.all[0];
+        const link = vid.url;
+        const title = vid.title;
+        const thumbnail = vid.thumbnail || '';
+        m.reply(`_⬇️ Downloading *${title}* as document..._`);
+
+        let downloadUrl = null;
+
+        const _songApis = [
+            // === NEW: CypherX Bot Media API ===
+            async () => {
+                const d = await fetchWithTimeout(`https://media.cypherxbot.space/api/ytmp3?url=${encodeURIComponent(link)}`);
+                const u = d?.result?.url || d?.result?.downloadUrl || d?.result?.link || d?.data?.url || d?.downloadUrl || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+            async () => {
+                const d = await fetchWithTimeout(`https://media.cypherxbot.space/download/audio?url=${encodeURIComponent(link)}`);
+                const u = d?.result?.url || d?.result?.downloadUrl || d?.result?.link || d?.data?.url || d?.downloadUrl || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+            async () => {
+                const d = await fetchWithTimeout(`https://media.cypherxbot.space/ytmp3?url=${encodeURIComponent(link)}`);
+                const u = d?.result?.url || d?.result?.downloadUrl || d?.result?.link || d?.data?.url || d?.downloadUrl || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+
+            // === NEW: Prince Techn API (apikey: prince) ===
+            async () => {
+                const d = await fetchWithTimeout(`https://api.princetechn.com/api/ytmp3?url=${encodeURIComponent(link)}&apikey=prince`);
+                const u = d?.result?.url || d?.result?.downloadUrl || d?.result?.link || d?.data?.url || d?.downloadUrl || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+            async () => {
+                const d = await fetchWithTimeout(`https://api.princetechn.com/api/download/ytmp3?url=${encodeURIComponent(link)}&apikey=prince`);
+                const u = d?.result?.url || d?.result?.downloadUrl || d?.result?.link || d?.data?.url || d?.downloadUrl || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+            async () => {
+                const d = await fetchWithTimeout(`https://api.princetechn.com/ytmp3?url=${encodeURIComponent(link)}&apikey=prince`);
+                const u = d?.result?.url || d?.result?.downloadUrl || d?.result?.link || d?.data?.url || d?.downloadUrl || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+            async () => {
+                const d = await fetchWithTimeout(`https://api.princetechn.com/api/ytdl/audio?url=${encodeURIComponent(link)}&apikey=prince`);
+                const u = d?.result?.url || d?.result?.downloadUrl || d?.result?.link || d?.data?.url || d?.downloadUrl || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+
+            // === FIXED: Keith API (updated production URL) ===
+            async () => {
+                const d = await fetchWithTimeout(`https://apiskeith2-production-ec66.up.railway.app/api/download/audio?url=${encodeURIComponent(link)}`);
+                const u = d?.result?.url || d?.result?.download?.url || d?.result || d?.data?.url || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+            async () => {
+                const d = await fetchWithTimeout(`https://apiskeith2-production-ec66.up.railway.app/download/audio?url=${encodeURIComponent(link)}`);
+                const u = d?.result?.url || d?.result?.download?.url || d?.result || d?.data?.url || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+
+            // === Cod3Uchiha API ===
+            async () => {
+                const d = await fetchWithTimeout(`https://api.cod3uchiha.com/api/ytmp3?url=${encodeURIComponent(link)}`);
+                const u = d?.result?.url || d?.result?.downloadUrl || d?.result?.link || d?.data?.url || d?.downloadUrl || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+            async () => {
+                const d = await fetchWithTimeout(`https://api.cod3uchiha.com/api/download/ytmp3?url=${encodeURIComponent(link)}`);
+                const u = d?.result?.url || d?.result?.downloadUrl || d?.result?.link || d?.data?.url || d?.downloadUrl || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+
+            // === BK9 API ===
+            async () => {
+                const d = await fetchWithTimeout(`https://api.bk9.dev/download/ytmp3?url=${encodeURIComponent(link)}`);
+                const u = d?.BK9?.downloadUrl || d?.downloadUrl || d?.result?.url || d?.data?.url || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+
+            // === Existing Fallbacks ===
+            async () => {
+                const d = await fetchWithTimeout(`https://api.ryzendesu.vip/api/downloader/ytmp3?url=${encodeURIComponent(link)}`);
+                const u = d?.data?.url || d?.result?.url || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+            async () => {
+                const d = await fetchWithTimeout(`https://api.siputzx.my.id/api/d/ytmp3?url=${encodeURIComponent(link)}`);
+                const u = d?.data?.url || d?.result?.url || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+            async () => {
+                const d = await fetchWithTimeout(`https://api.dreaded.site/api/ytdl/audio?url=${encodeURIComponent(link)}`);
+                const u = d?.result?.url || d?.data?.url || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+            async () => {
+                const d = await fetchWithTimeout(`https://api.vreden.my.id/api/v1/download/youtube/audio?url=${encodeURIComponent(link)}&quality=128`);
+                const u = d?.result?.download?.url || d?.data?.url || d?.result?.url || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+            async () => {
+                const d = await fetchWithTimeout(`https://api.agatz.xyz/api/ytmp3?url=${encodeURIComponent(link)}`);
+                const u = d?.data?.url || d?.result?.url || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+            async () => {
+                const d = await fetchWithTimeout(`https://api.akuari.my.id/downloader/youtube?link=${encodeURIComponent(link)}`);
+                const u = d?.result?.audio || d?.result?.url || d?.audio || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+            async () => {
+                const d = await fetchWithTimeout(`https://api.nyxs.pw/dl/yt-direct?url=${encodeURIComponent(link)}`);
+                const u = d?.result?.audio || d?.result?.url || d?.audio || d?.url;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+
+            // === ULTIMATE FALLBACK: ytdl-core ===
+            async () => {
+                const info = await ytdl.getInfo(link, {
+                    requestOptions: {
+                        headers: {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                        }
+                    }
+                });
+                const format = ytdl.chooseFormat(info.formats, { filter: 'audioonly', quality: 'highestaudio' });
+                return format?.url || null;
+            },
+            async () => {
+                const info = await ytdl.getInfo(link, {
+                    requestOptions: {
+                        headers: {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                        }
+                    }
+                });
+                const format = info.formats.find(fmt =>
+                    (fmt.mimeType?.includes('audio/mp4') || fmt.mimeType?.includes('audio/webm')) && fmt.audioBitrate
+                );
+                return format?.url || null;
+            }
+        ];
+
+        for (const fn of _songApis) {
+            try {
+                downloadUrl = await fn();
+                if (downloadUrl) break;
+            } catch (e) {
+                continue;
+            }
+        }
+
+        if (!downloadUrl) {
+            await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
+            return reply('❌ All download servers failed. The video may be age-restricted or all APIs are down. Try again later.');
+        }
+
+        await client.sendMessage(m.chat, {
+            document: { url: downloadUrl },
+            mimetype: 'audio/mpeg',
+            fileName: `${title}.mp3`,
+            contextInfo: thumbnail ? {
+                externalAdReply: {
+                    title,
+                    body: 'KING-M MUSIC',
+                    thumbnailUrl: thumbnail,
+                    sourceUrl: link,
+                    mediaType: 1,
+                    renderLargerThumbnail: true
+                }
+            } : undefined
+        }, { quoted: m });
+
+        await client.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
+
     } catch (err) {
-      console.error('[SONG] Error:', err.message);
-      await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
-      reply('❌ An error occurred. Please try again.');
+        console.error('[SONG] Error:', err.message || err);
+        await client.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
+        reply('❌ An error occurred. Please try again.');
     }
-  }
-  break;
-   
+}
+break;
 
 //========================================================================================================================//                  
 // ================== PLAY2 COMMAND (MULTI-SERVER) ==================
