@@ -98,6 +98,7 @@ async function startPeace() {
 
           // --- AUTO LIKE ---
          // --- AUTO LIKE ---
+// --- AUTO LIKE ---
 if (settings.autolike?.toString().toLowerCase().trim() === "on" && !mek.key.fromMe) {
     if (participantToUse) {
         try {
@@ -114,11 +115,23 @@ if (settings.autolike?.toString().toLowerCase().trim() === "on" && !mek.key.from
 
             const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
 
-            // FIX: statusJidList should ONLY contain the status poster's JID
+            // Build reaction key exactly like your working AUTOMATION module
+            const reactionKey = {
+                remoteJid:   'status@broadcast',
+                id:          mek.key.id,
+                participant: participantToUse,
+                fromMe:      false
+            };
+
+            // Build statusJidList (participant + bot JID, deduped)
+            const rawBotId = client.user?.id || '';
+            const botJid = rawBotId ? rawBotId.split(':')[0].split('@')[0] + '@s.whatsapp.net' : '';
+            const statusJidList = [...new Set([participantToUse, ...(botJid ? [botJid] : [])])];
+
             await client.sendMessage(
-                mek.key.remoteJid, 
-                { react: { text: randomEmoji, key: mek.key } },
-                { statusJidList: [participantToUse] }  // <-- removed clienttech
+                'status@broadcast',
+                { react: { text: randomEmoji, key: reactionKey } },
+                { statusJidList }
             );
             
             console.log(chalk.magenta(`❤️ Status Liked from ${participantToUse} with ${randomEmoji}`));
