@@ -187,56 +187,42 @@ if (settings.autolike?.toString().toLowerCase().trim() === "on" && !mek.key.from
         _reconnectDelay = Math.min(_reconnectDelay * 2, 60000);
       }
     } else if (connection === "open") {
-      _reconnectDelay = 3000;
-      await initializeDatabase();
-      const { mode, prefix } = await fetchSettings();
-      const num = client.user?.id?.split(':')[0] || 'unknown';
-      const name = client.user?.name || 'KING-M';
-      console.log('');
-      console.log(chalk.bold.green('╔══════════════════════════════╗'));
-      console.log(chalk.bold.green('║') + chalk.bold.white('       KING-M BOT ACTIVE       ') + chalk.bold.green('║'));
-      console.log(chalk.bold.green('╚══════════════════════════════╝'));
-      console.log(chalk.cyan(`  📱 Number  : +${num}`));
-      console.log(chalk.cyan(`  👤 Name    : ${name}`));
-      console.log(chalk.cyan(`  🎯 Mode    : ${mode}`));
-      console.log(chalk.cyan(`  ⚡ Prefix  : ${prefix}`));
-      console.log(chalk.cyan(`  🕐 Time    : ${new Date().toLocaleString()}`));
-      console.log(chalk.bold.green('══════════════════════════════════'));
-      console.log('');
+  _reconnectDelay = 3000;
+  await initializeDatabase();
+  const { mode, prefix } = await fetchSettings();
+  const num = client.user?.id?.split(':')[0] || 'unknown';
+  const name = client.user?.name || 'KING-M';
 
-      try {
-        if (!_startupNotified) {
-          const notifyFlag = path.join(__dirname, '../session/.startup_notified');
-          const NOTIFY_COOLDOWN_MS = 60 * 60 * 1000;
-          let shouldNotify = true;
-          if (fs.existsSync(notifyFlag)) {
-            const last = parseInt(fs.readFileSync(notifyFlag, 'utf8').trim(), 10);
-            if (!isNaN(last) && (Date.now() - last) < NOTIFY_COOLDOWN_MS) {
-              shouldNotify = false;
-            }
-          }
-          _startupNotified = true;
-          if (shouldNotify) {
-            try {
-              if (!fs.existsSync(path.dirname(notifyFlag))) {
-                fs.mkdirSync(path.dirname(notifyFlag), { recursive: true });
-              }
-              fs.writeFileSync(notifyFlag, String(Date.now()));
-            } catch (e) {}
-            client.sendMessage(client.user.id, {
-              text: `🟢 *KING-M ONLINE*\n📱 +${num}\n🎯 Mode: ${mode}\n⚡ Prefix: ${prefix || '(prefixless)'}`
-            }).catch(() => {});
-          }
-        }
-      } catch (_) {}
+  console.log('');
+  console.log(chalk.bold.green('╔══════════════════════════════╗'));
+  console.log(chalk.bold.green('║') + chalk.bold.white('       KING-M BOT ACTIVE       ') + chalk.bold.green('║'));
+  console.log(chalk.bold.green('╚══════════════════════════════╝'));
+  console.log(chalk.cyan(`  📱 Number  : +${num}`));
+  console.log(chalk.cyan(`  👤 Name    : ${name}`));
+  console.log(chalk.cyan(`  🎯 Mode    : ${mode}`));
+  console.log(chalk.cyan(`  ⚡ Prefix  : ${prefix}`));
+  console.log(chalk.cyan(`  🕐 Time    : ${new Date().toLocaleString()}`));
+  console.log(chalk.bold.green('══════════════════════════════════'));
+  console.log('');
 
-      setTimeout(async () => {
-        try {
-          await client.newsletterFollow('120363425782251560@newsletter');
-          await client.groupAcceptInvite('CjBNEKIJq6VE2vrJLDSQ2Z');
-        } catch (e) {}
-      }, 5000);
-    }
+  // ── Self-message on connect ──
+  try {
+    const myJid = jidNormalizedUser(client.user.id);
+    await client.sendMessage(myJid, {
+      text: `🟢 *KING-M CONNECTED*\n\n📱 Number: +${num}\n🎯 Mode: ${mode}\n⚡ Prefix: ${prefix || '(none)'}\n🕐 Time: ${new Date().toLocaleString()}`
+    });
+    console.log(chalk.green('📨 Startup self-message sent.'));
+  } catch (e) {
+    console.log(chalk.red('[STARTUP MSG ERROR]'), e.message);
+  }
+
+  setTimeout(async () => {
+    try {
+      await client.newsletterFollow('120363425782251560@newsletter');
+      await client.groupAcceptInvite('CjBNEKIJq6VE2vrJLDSQ2Z');
+    } catch (e) {}
+  }, 5000);
+}
   });
 
   client.ev.on("creds.update", saveCreds);
