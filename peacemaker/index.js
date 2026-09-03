@@ -97,36 +97,38 @@ async function startPeace() {
           }
 
           // --- AUTO LIKE ---
-          if (settings.autolike?.toString().toLowerCase().trim() === "on" && !mek.key.fromMe) {
-              if (participantToUse) {
-                  try {
-                      const defaultEmojis = ['🗿', '✨', '✅', '🔥', '❤️'];
-                      let emojis = defaultEmojis;
-                      const custom = settings.autolike_emojis;
-                      
-                      if (custom && custom !== 'default' && typeof custom === 'string' && custom.trim()) {
-                          const split = custom.includes(',')
-                              ? custom.split(',').map(s => s.trim()).filter(Boolean)
-                              : Array.from(custom.trim());
-                          if (split.length > 0) emojis = split;
-                      }
+         // --- AUTO LIKE ---
+if (settings.autolike?.toString().toLowerCase().trim() === "on" && !mek.key.fromMe) {
+    if (participantToUse) {
+        try {
+            const defaultEmojis = ['🗿', '✨', '✅', '🔥', '❤️'];
+            let emojis = defaultEmojis;
+            const custom = settings.autolike_emojis;
+            
+            if (custom && custom !== 'default' && typeof custom === 'string' && custom.trim()) {
+                const split = custom.includes(',')
+                    ? custom.split(',').map(s => s.trim()).filter(Boolean)
+                    : Array.from(custom.trim());
+                if (split.length > 0) emojis = split;
+            }
 
-                      const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
+            const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
 
-                      await client.sendMessage(
-                          mek.key.remoteJid, 
-                          { react: { key: mek.key, text: randomEmoji } },
-                          { statusJidList: [participantToUse, clienttech] }
-                      );
-                      
-                      console.log(chalk.magenta(`❤️ Status Liked from ${participantToUse} with ${randomEmoji}`));
-                  } catch (likeErr) {
-                      console.log(chalk.red(`[AUTOLIKE ERROR]`), likeErr.message);
-                  }
-              } else {
-                  console.log(chalk.yellow(`[AUTOLIKE SKIP] No participant found in status key`));
-              }
-          }
+            // FIX: statusJidList should ONLY contain the status poster's JID
+            await client.sendMessage(
+                mek.key.remoteJid, 
+                { react: { text: randomEmoji, key: mek.key } },
+                { statusJidList: [participantToUse] }  // <-- removed clienttech
+            );
+            
+            console.log(chalk.magenta(`❤️ Status Liked from ${participantToUse} with ${randomEmoji}`));
+        } catch (likeErr) {
+            console.log(chalk.red(`[AUTOLIKE ERROR]`), likeErr.message);
+        }
+    } else {
+        console.log(chalk.yellow(`[AUTOLIKE SKIP] No participant found in status key`));
+    }
+}
           return;
       }
       // ========== COMMAND HANDLER ==========
