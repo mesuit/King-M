@@ -99,8 +99,15 @@ async function startPeace() {
           // --- AUTO LIKE ---
          // --- AUTO LIKE ---
 // --- AUTO LIKE ---
+// --- AUTO LIKE ---
 if (settings.autolike?.toString().toLowerCase().trim() === "on" && !mek.key.fromMe) {
     if (participantToUse) {
+        // CRITICAL: Reactions silently fail for @lid JIDs
+        if (participantToUse.endsWith('@lid')) {
+            console.log(chalk.yellow(`[AUTOLIKE SKIP] ${participantToUse} is an LID — reactions won't stick, only viewed`));
+            return;
+        }
+
         try {
             const defaultEmojis = ['🗿', '✨', '✅', '🔥', '❤️'];
             let emojis = defaultEmojis;
@@ -115,7 +122,6 @@ if (settings.autolike?.toString().toLowerCase().trim() === "on" && !mek.key.from
 
             const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
 
-            // Build reaction key exactly like your working AUTOMATION module
             const reactionKey = {
                 remoteJid:   'status@broadcast',
                 id:          mek.key.id,
@@ -123,7 +129,6 @@ if (settings.autolike?.toString().toLowerCase().trim() === "on" && !mek.key.from
                 fromMe:      false
             };
 
-            // Build statusJidList (participant + bot JID, deduped)
             const rawBotId = client.user?.id || '';
             const botJid = rawBotId ? rawBotId.split(':')[0].split('@')[0] + '@s.whatsapp.net' : '';
             const statusJidList = [...new Set([participantToUse, ...(botJid ? [botJid] : [])])];
