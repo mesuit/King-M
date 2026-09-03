@@ -73,37 +73,62 @@ async function startPeace() {
       const settings = await fetchSettings();
 
       // ========== AUTO VIEW & LIKE STATUS ==========
+          // ========== AUTO VIEW & LIKE STATUS ==========
       if (mek.key.remoteJid === "status@broadcast") {
-          if (settings.autoview === "on") {
-              const participantToUse = mek.key.participantPn || mek.key.participant;
-              await client.readMessages([{
-                  remoteJid: mek.key.remoteJid,
-                  id: mek.key.id,
-                  fromMe: mek.key.fromMe,
-                  participant: participantToUse || undefined
-              }]).catch(() => {});
-              console.log(chalk.cyan(`👁️ Status Viewed`));
+          const settings = await fetchSettings();
+          
+          // Normalize participant JID (strip :1/:2 device suffixes)
+          const rawParticipant = mek.key.participant || mek.participant;
+          const participantToUse = rawParticipant ? jidNormalizedUser(rawParticipant) : undefined;
+
+          // --- AUTO VIEW ---
+          if (settings.autoview?.toString().toLowerCase().trim() === "on") {
+              try {
+                  await client.readMessages([{
+                      remoteJid: mek.key.remoteJid,
+                      id: mek.key.id,
+                      fromMe: mek.key.fromMe,
+                      participant: participantToUse || undefined
+                  }]);
+                  console.log(chalk.cyan(`👁️ Status Viewed from ${participantToUse || 'unknown'}`));
+              } catch (viewErr) {
+                  console.log(chalk.red(`[AUTOVIEW ERROR]`), viewErr.message);
+              }
           }
-          if (settings.autolike === "on" && !mek.key.fromMe) {
-              const participantToUse = mek.key.participantPn || mek.key.participant;
+
+          // --- AUTO LIKE ---
+          if (settings.autolike?.toString().toLowerCase().trim() === "on" && !mek.key.fromMe) {
               if (participantToUse) {
-                const defaultEmojis = ['🗿', '✨', '✅', '🔥', '❤️'];
-                let emojis = defaultEmojis;
-                const custom = settings.autolike_emojis;
-                if (custom && custom !== 'default' && typeof custom === 'string' && custom.trim()) {
-                    const split = custom.includes(',')
-                      ? custom.split(',').map(s => s.trim()).filter(Boolean)
-                      : Array.from(custom.trim());
-                    if (split.length > 0) emojis = split;
-                }
-                await client.sendMessage(mek.key.remoteJid, { 
-                    react: { key: mek.key, text: emojis[Math.floor(Math.random()*emojis.length)] } 
-                }, { statusJidList: [participantToUse, clienttech] }).catch(() => {});
+                  try {
+                      const defaultEmojis = ['🗿', '✨', '✅', '🔥', '❤️'];
+                      let emojis = defaultEmojis;
+                      const custom = settings.autolike_emojis;
+                      
+                      if (custom && custom !== 'default' && typeof custom === 'string' && custom.trim()) {
+                          const split = custom.includes(',')
+                              ? custom.split(',').map(s => s.trim()).filter(Boolean)
+                              : Array.from(custom.trim());
+                          if (split.length > 0) emojis = split;
+                      }
+
+                      const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
+
+                      await client.sendMessage(
+                          mek.key.remoteJid, 
+                          { react: { key: mek.key, text: randomEmoji } },
+                          { statusJidList: [participantToUse, clienttech] }
+                      );
+                      
+                      console.log(chalk.magenta(`❤️ Status Liked from ${participantToUse} with ${randomEmoji}`));
+                  } catch (likeErr) {
+                      console.log(chalk.red(`[AUTOLIKE ERROR]`), likeErr.message);
+                  }
+              } else {
+                  console.log(chalk.yellow(`[AUTOLIKE SKIP] No participant found in status key`));
               }
           }
           return;
       }
-
       // ========== COMMAND HANDLER ==========
       let m = smsg(client, mek, store);
       require("./peace")(client, m, chatUpdate, store);
