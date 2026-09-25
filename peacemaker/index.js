@@ -100,15 +100,9 @@ async function startPeace() {
          // --- AUTO LIKE ---
 // --- AUTO LIKE ---
 // --- AUTO LIKE ---
-if (settings.autolike?.toString().toLowerCase().trim() === "on" && !mek.key.fromMe) {
-    if (participantToUse) {
-        // CRITICAL: Reactions silently fail for @lid JIDs
-        if (participantToUse.endsWith('@lid')) {
-            console.log(chalk.yellow(`[AUTOLIKE SKIP] ${participantToUse} is an LID — reactions won't stick, only viewed`));
-            return;
-        }
-
-        try {
+ if (settings.autolike?.toString().toLowerCase().trim() === "on" && !mek.key.fromMe) {
+     if (participantToUse) {
+         try {
             const defaultEmojis = ['🗿', '✨', '✅', '🔥', '❤️'];
             let emojis = defaultEmojis;
             const custom = settings.autolike_emojis;
@@ -129,9 +123,9 @@ if (settings.autolike?.toString().toLowerCase().trim() === "on" && !mek.key.from
                 fromMe:      false
             };
 
-            const rawBotId = client.user?.id || '';
-            const botJid = rawBotId ? rawBotId.split(':')[0].split('@')[0] + '@s.whatsapp.net' : '';
-            const statusJidList = [...new Set([participantToUse, ...(botJid ? [botJid] : [])])];
+             // Status senders may arrive as @lid JIDs; keep that JID for the
+             // reaction key and address the reaction only to the status author.
+             const statusJidList = [participantToUse];
 
             await client.sendMessage(
                 'status@broadcast',
