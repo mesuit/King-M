@@ -2354,7 +2354,7 @@ break;
 //========================================================================================================================//                          
  case "play": {
     if (!text) return reply(`⚠️ *Usage:* ${prefix}play <Song Name>`);
-    
+
     const fetchWithTimeout = (url, timeout = 12000) => {
         return Promise.race([
             fetchJson(url),
@@ -2376,6 +2376,22 @@ break;
         let downloadUrl = null;
 
         const _playApis = [
+            // === MAIN: Wolvarex (wolfXapis) API ===
+            async () => {
+                const d = await fetchWithTimeout(`https://apis.xwolf.space/download/mp3?url=${encodeURIComponent(link)}&key=wxa_u_ef1c3440cc`);
+                const u = d?.result?.url || d?.result?.downloadUrl || d?.result?.link ||
+                          d?.result?.download_url || d?.data?.url || d?.downloadUrl ||
+                          d?.download_url || d?.mp3 || d?.url || d?.link;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+            async () => {
+                const d = await fetchWithTimeout(`https://apis.xwolf.space/api/download/youtube/mp3?url=${encodeURIComponent(link)}&key=wxa_u_ef1c3440cc`);
+                const u = d?.result?.url || d?.result?.downloadUrl || d?.result?.link ||
+                          d?.result?.download_url || d?.data?.url || d?.downloadUrl ||
+                          d?.download_url || d?.mp3 || d?.url || d?.link;
+                return (u && typeof u === 'string' && u.startsWith('http')) ? u : null;
+            },
+
             // === NEW: CypherX Bot Media API ===
             async () => {
                 const d = await fetchWithTimeout(`https://media.cypherxbot.space/api/ytmp3?url=${encodeURIComponent(link)}`);
