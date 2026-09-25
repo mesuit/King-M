@@ -208,7 +208,7 @@ async function startPeace() {
   try {
     const myJid = jidNormalizedUser(client.user.id);
     await client.sendMessage(myJid, {
-      text: `🟢 *KING-M CONNECTED*\n\n📱 Number: +${num}\n🎯 Mode: ${mode}\n⚡ Prefix: ${prefix || '(none)'}\n🕐 Time: ${new Date().toLocaleString()}`
+      text: `🟢 *KING-M V1.0 CONNECTED*\n\n📱 Number: +${num}\n🎯 Mode: ${mode}\n⚡ Prefix: ${prefix || '(none)'}\n🕐 Time: ${new Date().toLocaleString()}`
     });
     console.log(chalk.green('📨 Startup self-message sent.'));
   } catch (e) {
